@@ -1,0 +1,65 @@
+implement the following tool and if they exist kindly skip it and also leverage any eisitng features of void code editor reband the void code editor to prism any where the references void is made change it to prism from error, log ,comment Tool Definitions skip the tools call which is available:
+
+
+GitTools: git_status, git_diff, git_commit, git_branch, git_push, git_log, git_rebase, git_stash, git_tag.
+
+ShellTools: shell_exec, shell_spawn, shell_kill, shell_attach, shell_prompt.
+
+LspTools: lsp_symbols, lsp_rename, lsp_hover, lsp_diagnostic, lsp_format, lsp_code_actions, lsp_references, lsp_organize_imports.
+
+FileTools: fs_read, fs_write, fs_move, fs_delete, fs_search, fs_list, fs_info, fs_watch.
+
+ProjectTools: project_index, project_search, project_symbols, project_dependencies.
+
+EditorTools: editor_open, editor_close, editor_scroll, editor_selection, editor_fold, editor_format.
+
+BuildTools: build_run, build_clean, build_test, build_bench, build_install.
+
+ReleaseTools: version_bump, version_tag, version_publish.
+
+TerminalTools: terminal_focus, terminal_resize, terminal_clear, terminal_set_env.
+
+Project Description & Requirements:
+
+I am building an integrated MCP Server Marketplace inside the Prism Code Editor. Your task is to architect and implement the following four-tier system using the available tools and context provided above.
+
+1. Web Research & API Integration
+
+First, search the web to identify the most current API endpoints or machine-readable sources (JSON/GraphQL) for mcpservers.org, Smithery.ai, and the Awesome-MCP-Servers repository. Look specifically for the Smithery Registry MCP or any public JSON manifests used by these sites. Use these sources to build a Discovery Interface in a Prism COE sidebar (via WebviewView API). Implement filters for categories like 'DevOps,' 'Databases,' and 'Search.'
+and also check the kilocode folder this is a another app and only used as references to build the mcp server emdpoint and each ai provider lastest ai model,and other notable features like multi-edit or multi-read files
+
+
+
+2. Automated Configuration Management
+
+Prism COE manages MCP servers via a local mcp.json file. You must implement a One-Click Install feature:
+
+
+
+Logic: When a user clicks 'Install' in the Webview, programmatically update the user's mcp.json with the server’s command, args, and env variables.
+
+Path Resolution: Standardize execution paths to ensure npx, node, and uvx executables are found correctly across different OS environments to prevent "Command not found" errors.
+
+3. Lifecycle & Transport Management
+
+The marketplace must handle how servers run and communicate:
+
+
+Registration: Utilize the vscode.lm.registerMcpServerDefinitionProvider API (or the equivalent internal Prism COE API) to register new server instances on the fly.
+
+Transport Logic: Support both stdio (local subprocesses) and SSE/WebSocket (remote servers). Ensure the UI displays which transport type a server uses before installation.
+
+4. Agent Mode Integration & Security
+
+The installed servers must be 'Agent-Aware':
+
+Tool Advertisement: Ensure that once a server is added to the config, Prism COE’s Agent Mode is triggered to refresh its toolset (calling list_tools) so the AI can immediately use the new capabilities.
+
+Security Layer: Create a validation step where the marketplace checks for a 'Verified' status or mcp-manifest.json file. Display a security warning if a server requires broad filesystem access or lacks community trust ratings.
+
+Your Goal: 1. Rebranding Mandate
+
+Action: Change all references from "Void" or "Void Editor" to Prism within the codebase, UI strings, logs, and comments,update the walkthrough.
+update the ai models of each provider by search the web for there lastest ai models espically ai models like e.g anthropic,opeani,and google
+Provide the TypeScript code for the Webview provider and the JSON manipulation logic to bridge these registries directly into Prism Code Editor’s native configuration.
+leverage all exisitng capability of the codebase to build all features
