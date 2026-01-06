@@ -28,7 +28,7 @@ export class StreamSplitter extends Transform {
 
 		let offset = 0;
 		while (offset < this.buffer.length) {
-			const index = this.buffer.indexOf(this.splitter, offset);
+			const index = (this.buffer as unknown as Uint8Array).indexOf(this.splitter, offset);
 			if (index === -1) {
 				break;
 			}
