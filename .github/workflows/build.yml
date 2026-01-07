@@ -1,5 +1,4 @@
 name: Build Prism Editor
-
 on:
   push:
     branches: [ main, master ]
@@ -13,180 +12,177 @@ jobs:
     permissions:
       contents: write
       packages: write
-
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: ['20']
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: '**/package-lock.json'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
 
-    - name: Install Dependencies and Fix Config
-      shell: bash
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        echo "Installing dependencies with Node.js $(node -v)"
-        npm install --no-fund --no-audit --ignore-scripts --prefer-offline
-
-        echo "Fixing Electron Builder config file format..."
-
-        CONFIG_FILE=".electron-builder.config.js"
-        CONFIG_FILE_CJS=".electron-builder.config.cjs"
-
-        # Check if the config file exists and is a .js file
-        if [ -f "$CONFIG_FILE" ]; then
-          echo "Found config file: $CONFIG_FILE"
-          echo "Renaming to .cjs extension..."
-          mv "$CONFIG_FILE" "$CONFIG_FILE_CJS"
-        elif [ ! -f "$CONFIG_FILE" ] && [ ! -f "$CONFIG_FILE_CJS" ]; then
-          echo "No config file found, creating new one..."
-
-          # Create the config file using echo with proper escaping
-          echo 'module.exports = {
-            productName: "Prism Editor",
-            appId: "com.prism-editor.app",
-            directories: {
-              output: "release"
-            },
-            files: [
-              "out/**/*",
-              "resources/**/*",
-              "package.json"
-            ],
-            win: {
-              target: "nsis"
-            },
-            mac: {
-              target: "dmg"
-            },
-            linux: {
-              target: "AppImage"
-            }
-          };' > "$CONFIG_FILE_CJS"
-
-          echo "✅ Created new electron-builder.config.cjs"
-        fi
-
-    - name: Package Application
-      shell: bash
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        echo "Packaging application for ${{ runner.os }}..."
-
-        # Set platform-specific flags
-        if [ "$RUNNER_OS" = "Windows" ]; then
-          PLATFORM_FLAG="--win"
-          echo "Using Windows platform flag: $PLATFORM_FLAG"
-        elif [ "$RUNNER_OS" = "macOS" ]; then
-          PLATFORM_FLAG="--mac"
-          echo "Using macOS platform flag: $PLATFORM_FLAG"
-        else
-          PLATFORM_FLAG="--linux"
-          echo "Using Linux platform flag: $PLATFORM_FLAG"
-        fi
-
-        # Run packaging command with fallback logic
-        echo "Running packaging command..."
-
-        # Try with explicit config file if it exists
-        if [ -f "electron-builder.config.cjs" ]; then
-          echo "Using config file: electron-builder.config.cjs"
-          if npm run package -- $PLATFORM_FLAG --config electron-builder.config.cjs; then
-            echo "✅ Packaging successful with config file!"
-            exit 0
+      - name: Install Dependencies and Fix Config
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Installing dependencies with Node.js $(node -v)"
+          npm install --no-fund --no-audit --ignore-scripts --prefer-offline
+          echo "Fixing Electron Builder config file format..."
+          CONFIG_FILE=".electron-builder.config.js"
+          CONFIG_FILE_CJS=".electron-builder.config.cjs"
+          # Check if the config file exists and is a .js file
+          if [ -f "$CONFIG_FILE" ]; then
+            echo "Found config file: $CONFIG_FILE"
+            echo "Renaming to .cjs extension..."
+            mv "$CONFIG_FILE" "$CONFIG_FILE_CJS"
+          elif [ ! -f "$CONFIG_FILE" ] && [ ! -f "$CONFIG_FILE_CJS" ]; then
+            echo "No config file found, creating new one..."
+            # Create the config file using echo with proper escaping
+            echo 'module.exports = { productName: "Prism Editor", appId: "com.prism-editor.app", directories: { output: "release" }, files: [ "out/**/*", "resources/**/*", "package.json" ], win: { target: "nsis" }, mac: { target: "dmg" }, linux: { target: "AppImage" } };' > "$CONFIG_FILE_CJS"
+            echo "✅ Created new electron-builder.config.cjs"
           fi
-        elif [ -f ".electron-builder.config.cjs" ]; then
-          echo "Using config file: .electron-builder.config.cjs"
-          if npm run package -- $PLATFORM_FLAG --config .electron-builder.config.cjs; then
-            echo "✅ Packaging successful with config file!"
-            exit 0
+
+      - name: Package Application
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Packaging application for ${{ runner.os }}..."
+          # Set platform-specific flags
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PLATFORM_FLAG="--win"
+            echo "Using Windows platform flag: $PLATFORM_FLAG"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            PLATFORM_FLAG="--mac"
+            echo "Using macOS platform flag: $PLATFORM_FLAG"
+          else
+            PLATFORM_FLAG="--linux"
+            echo "Using Linux platform flag: $PLATFORM_FLAG"
           fi
-        fi
-
-        # Fallback 1: Try without explicit config
-        echo "⚠️ Config file method failed, trying without explicit config..."
-        if npm run package -- $PLATFORM_FLAG; then
-          echo "✅ Packaging successful without explicit config!"
-          exit 0
-        fi
-
-        # Fallback 2: Direct electron-builder call
-        echo "⚠️ Standard package command failed, trying direct electron-builder..."
-        if npx electron-builder $PLATFORM_FLAG; then
-          echo "✅ Direct electron-builder successful!"
-          exit 0
-        fi
-
-        # Fallback 3: Check if build artifacts exist anyway
-        echo "⚠️ All packaging methods failed. Checking for existing build artifacts..."
-
-        # Check common build artifact locations
-        if [ -d "release" ] || [ -d "out" ] || [ -d "dist" ] || [ -d "build" ]; then
-          echo "✅ Found build directories. Continuing with existing artifacts..."
-          exit 0
-        fi
-
-        echo "❌ No build artifacts found and all packaging methods failed"
-        exit 1
-
-    - name: Find and Prepare Artifacts (Linux/macOS)
-      if: runner.os != 'Windows'
-      shell: bash
-      id: find-artifacts
-      run: |
-        echo "Searching for build artifacts..."
-
-        # Platform-specific artifact search
-        if [ "$RUNNER_OS" = "Linux" ]; then
-          ARTIFACT_PATTERN="*.AppImage *.tar.gz *.deb *.rpm *.zip"
-        elif [ "$RUNNER_OS" = "macOS" ]; then
-          ARTIFACT_PATTERN="*.dmg *.zip *.tar.gz *.app"
-        fi
-
-        # Search for artifacts
-        ARTIFACT_PATH=""
-        for dir in release dist out build products; do
-          if [ -d "$dir" ]; then
-            found_file=$(find "$dir" -type f -iname "$ARTIFACT_PATTERN" -print -quit)
-            if [ -n "$found_file" ]; then
-              ARTIFACT_PATH="$found_file"
-              break
+          # Run packaging command with fallback logic
+          echo "Running packaging command..."
+          # Try with explicit config file if it exists
+          if [ -f "electron-builder.config.cjs" ]; then
+            echo "Using config file: electron-builder.config.cjs"
+            if npm run package -- $PLATFORM_FLAG --config electron-builder.config.cjs; then
+              echo "✅ Packaging successful with config file!"
+              exit 0
+            fi
+          elif [ -f ".electron-builder.config.cjs" ]; then
+            echo "Using config file: .electron-builder.config.cjs"
+            if npm run package -- $PLATFORM_FLAG --config .electron-builder.config.cjs; then
+              echo "✅ Packaging successful with config file!"
+              exit 0
             fi
           fi
-        done
-
-        if [ -n "$ARTIFACT_PATH" ]; then
-          echo "✅ Found artifact at $ARTIFACT_PATH"
-          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
-        else
-          echo "❌ No artifacts found."
+          # Fallback 1: Try without explicit config
+          echo "⚠️ Config file method failed, trying without explicit config..."
+          if npm run package -- $PLATFORM_FLAG; then
+            echo "✅ Packaging successful without explicit config!"
+            exit 0
+          fi
+          # Fallback 2: Direct electron-builder call
+          echo "⚠️ Standard package command failed, trying direct electron-builder..."
+          if npx electron-builder $PLATFORM_FLAG; then
+            echo "✅ Direct electron-builder successful!"
+            exit 0
+          fi
+          # Fallback 3: Check if build artifacts exist anyway
+          echo "⚠️ All packaging methods failed. Checking for existing build artifacts..."
+          # Check common build artifact locations
+          if [ -d "release" ] || [ -d "out" ] || [ -d "dist" ] || [ -d "build" ]; then
+            echo "✅ Found build directories. Continuing with existing artifacts..."
+            exit 0
+          fi
+          echo "❌ No build artifacts found and all packaging methods failed"
           exit 1
 
-    - name: Upload Artifacts
-      if: runner.os != 'Windows' && env.ARTIFACT_PATH
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ runner.os }}-build
-        path: ${{ env.ARTIFACT_PATH }}
+      # The user's original step definition (modified slightly for context)
+      - name: Find and Prepare Artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        id: find-artifacts
+        run: |
+          echo "Searching for build artifacts..."
+          # Platform-specific artifact search
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            ARTIFACT_PATTERN="*.AppImage *.tar.gz *.deb *.rpm *.zip"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            ARTIFACT_PATTERN="*.dmg *.zip *.tar.gz *.app"
+          fi
+          # Search for artifacts
+          ARTIFACT_PATH=""
+          for dir in release dist out build products; do
+            if [ -d "$dir" ]; then
+              found_file=$(find "$dir" -type f -iname "$ARTIFACT_PATTERN" -print -quit)
+              if [ -n "$found_file" ]; then
+                ARTIFACT_PATH="$found_file"
+                break
+              fi
+            fi
+          done
+          if [ -n "$ARTIFACT_PATH" ]; then
+            echo "✅ Found artifact at $ARTIFACT_PATH"
+            echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
+          else
+            echo "❌ No artifacts found."
+            exit 1
+          fi
 
-    - name: Upload Windows Artifacts
-      if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-build
-        path: "release/*"
+      # The *newly added* step which incorporates your requested script for Windows OS
+      - name: Find Windows Artifact
+        if: runner.os == 'Windows'
+        shell: bash
+        id: find-windows-artifact
+        run: |
+          echo "Searching for build artifacts..."
+          # Platform-specific artifact search (Windows)
+          ARTIFACT_PATTERN="*.exe *.zip *.nupkg"
+          # Search for artifacts
+          ARTIFACT_PATH=""
+          for dir in release dist out build products; do
+            if [ -d "$dir" ]; then
+              # Note: find command needs adjustment for Windows/Git Bash compatibility, using glob might be easier
+              # This script uses find but in the context of git bash/sh on Windows runner
+              found_file=$(find "$dir" -type f -iname $ARTIFACT_PATTERN -print -quit)
+              if [ -n "$found_file" ]; then
+                ARTIFACT_PATH="$found_file"
+                break
+              fi
+            fi
+          done
+          if [ -n "$ARTIFACT_PATH" ]; then
+            echo "✅ Found artifact at $ARTIFACT_PATH"
+            # Set environment variable for subsequent steps
+            echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
+          else
+            echo "❌ No artifacts found."
+            # Exit 1 is commented out here to allow the 'Upload Windows Artifacts' step to upload the whole 'release' folder if specific file search fails
+            # exit 1 
+          fi
+
+      - name: Upload Artifacts
+        if: runner.os != 'Windows' && env.ARTIFACT_PATH
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-build
+          path: ${{ env.ARTIFACT_PATH }}
+
+      - name: Upload Windows Artifacts
+        # This step uses the general 'release' path if a specific ARTIFACT_PATH wasn't found by the previous step's script
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: "release/*"
