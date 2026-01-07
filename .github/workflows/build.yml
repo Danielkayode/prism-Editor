@@ -36,8 +36,8 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
-        cache: 'yarn' 
-        # Changed to 'yarn' because VS Code forks require yarn.lock
+        # REMOVED 'cache: yarn' because you don't have a yarn.lock file yet.
+        # We will let the install step generate it.
 
     - name: Install Linux Dependencies
       if: runner.os == 'Linux'
@@ -52,27 +52,29 @@ jobs:
         npm install -g yarn
 
         echo "🔧 Injecting 'resolutions' to force node-addon-api v7.1.0..."
-        # We use a Node script to edit package.json because it works on Windows too.
-        # This fixes the C++ 'node_api_nogc_env' crash by forcing the older API version.
+        # This fixes the 'node_api_nogc_env' C++ crash on Windows/Linux
         node -e "
           const fs = require('fs');
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          pkg.resolutions = { ...pkg.resolutions, 'node-addon-api': '7.1.0' };
-          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          if (fs.existsSync('package.json')) {
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.resolutions = { ...pkg.resolutions, 'node-addon-api': '7.1.0' };
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          }
         "
+        
+        echo "🧹 Cleaning conflicting lock files..."
+        rm -rf package-lock.json node_modules
 
     - name: Install Dependencies
       shell: bash
       env:
-        # Token needed for @vscode/ripgrep download on macOS
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         PYTHON: python
-        # Prevent node-gyp concurrency issues on Windows
         CHILD_CONCURRENCY: 1
       run: |
         echo "📦 Installing with Yarn..."
-        # --frozen-lockfile=false allows Yarn to update the lockfile with our new resolution
+        # This will GENERATE the missing yarn.lock file, which the build script needs
         yarn install --frozen-lockfile=false --network-timeout 100000
 
     - name: Compile Project
@@ -81,13 +83,11 @@ jobs:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
         echo "🔨 Compiling..."
-        # Using yarn run compile ensures we use the environment set up by yarn
         yarn run compile
 
     - name: Verify Build
       shell: bash
       run: |
-        # Fail early if main.js wasn't created
         if [ ! -f "out/main.js" ] && [ ! -d "out" ]; then
           echo "❌ Error: Build failed to generate 'out/main.js'. Packaging will fail."
           exit 1
@@ -100,18 +100,15 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         USE_HARD_LINKS: false
       run: |
-        # Select Flag based on OS
         if [ "$RUNNER_OS" = "Windows" ]; then FLAGS="--win"; fi
         if [ "$RUNNER_OS" = "macOS" ]; then FLAGS="--mac"; fi
         if [ "$RUNNER_OS" = "Linux" ]; then FLAGS="--linux"; fi
 
         echo "🚀 Packaging for $RUNNER_OS..."
         
-        # Check if we need to point to a specific config file
         if [ -f "electron-builder.config.cjs" ]; then
            npx electron-builder build $FLAGS --config electron-builder.config.cjs
         else
-           # This uses your existing electron-builder.yml
            npx electron-builder build $FLAGS
         fi
 
