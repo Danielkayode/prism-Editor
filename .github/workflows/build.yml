@@ -3,14 +3,10 @@ name: Build Prism Editor
 on:
   push:
     branches: [main, master]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
+    paths-ignore: ['**/*.md', 'docs/**']
   pull_request:
     branches: [main, master]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
+    paths-ignore: ['**/*.md', 'docs/**']
   workflow_dispatch:
     inputs:
       build_type:
@@ -18,16 +14,14 @@ on:
         required: true
         default: 'production'
         type: choice
-        options:
-          - production
-          - debug
+        options: [production, debug]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20.18.0'
+  NODE_VERSION: '20'
 
 jobs:
   build:
@@ -35,7 +29,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    
+
     strategy:
       fail-fast: false
       matrix:
@@ -48,9 +42,6 @@ jobs:
             platform: macos
 
     steps:
-    # ========================================
-    # Setup Environment
-    # ========================================
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
@@ -58,82 +49,59 @@ jobs:
         fetch-depth: 0
 
     # ========================================
-    # Install Node.js (Cross-platform)
+    # Setup Node.js (Before any npm commands)
     # ========================================
-    - name: Install Node.js
-      shell: bash
-      run: |
-        if [[ "${{ matrix.platform }}" == "windows" ]]; then
-          # Windows - Use PowerShell within bash
-          pwsh -Command "
-            \$$nodeUrl = 'https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-win-x64.zip';
-            Write-Host \"Downloading \$$nodeUrl\";
-            if (Test-Path 'node.zip') { Remove-Item node.zip };
-            Invoke-WebRequest -Uri \$$nodeUrl -OutFile node.zip;
-            if (Test-Path 'C:\\node') { Remove-Item -Recurse -Force C:\\node };
-            Expand-Archive node.zip -DestinationPath C:\\node;
-            Add-Content -Path \$$env:GITHUB_PATH -Value 'C:\\node\\node-v${{ env.NODE_VERSION }}-win-x64';
-            Add-Content -Path \$$env:GITHUB_PATH -Value 'C:\\node\\node-v${{ env.NODE_VERSION }}-win-x64\\node_modules\\npm\\bin';
-          "
-        elif [[ "${{ matrix.platform }}" == "macos" ]]; then
-          # macOS
-          if [ -d "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64" ]; then
-            rm -rf "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64"
-          fi
-          curl -fsSL "https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-darwin-arm64.tar.gz" | tar -xz
-          echo "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64/bin" >> $GITHUB_PATH
-        else
-          # Linux - Use official setup
-          if ! command -v node &> /dev/null; then
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-          fi
-        fi
-
-    - name: Verify Node.js Installation
-      shell: bash
-      run: |
-        node --version
-        npm --version
-        which node
-        which npm
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
 
     # ========================================
-    # Install System Dependencies
+    # Configure Build Tools (BEFORE npm install)
+    # ========================================
+    - name: Configure Windows Build Tools
+      if: matrix.platform == 'windows'
+      shell: pwsh
+      run: |
+        echo "npm_config_msvs_version=2022" >> $env:GITHUB_ENV
+        echo "npm_config_python=C:\\Python311\\python.exe" >> $env:GITHUB_ENV
+
+    - name: Configure Python Path (Unix)
+      if: matrix.platform != 'windows'
+      shell: bash
+      run: |
+        PYTHON_PATH=$(which python3 || which python || echo "/usr/bin/python3")
+        echo "Python found at: $PYTHON_PATH"
+        npm config set python "$PYTHON_PATH"
+        python3 --version
+
+    # ========================================
+    # Install Platform Dependencies
     # ========================================
     - name: Install Linux Dependencies
       if: matrix.platform == 'linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential \
-          python3 \
-          python3-pip \
-          libx11-dev \
-          libxkbfile-dev \
-          libsecret-1-dev \
-          libkrb5-dev \
-          libnotify-dev \
-          libgtk-3-dev \
-          libgbm-dev \
-          libxtst-dev \
-          libnss3 \
+          build-essential python3 python3-pip \
+          libx11-dev libxkbfile-dev libsecret-1-dev \
+          libkrb5-dev libnotify-dev libgtk-3-dev \
+          libgbm-dev libxtst-dev libnss3 \
           libasound2t64 \
-          libatk-bridge2.0-0 \
-          libdrm2 \
-          libxcomposite1 \
-          libxdamage1 \
-          libxrandr2 \
-          libpango-1.0-0 \
-          libcairo2 \
-          libcups2 \
-          libxss1 \
-          libxcursor1 \
-          fakeroot \
-          rpm \
-          dpkg
+          libatk-bridge2.0-0 libdrm2 \
+          libxcomposite1 libxdamage1 libxrandr2 \
+          libpango-1.0-0 libcairo2 libcups2 \
+          libxss1 libxcursor1 \
+          fakeroot rpm dpkg
 
-    - name: Install Windows Dependencies
+    - name: Install macOS Dependencies
+      if: matrix.platform == 'macos'
+      run: |
+        xcode-select --install 2>/dev/null || true
+        brew install pkg-config
+
+    - name: Install Windows Build Tools
       if: matrix.platform == 'windows'
       shell: pwsh
       run: |
@@ -141,34 +109,14 @@ jobs:
         echo "C:\Python311" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     # ========================================
-    # Configure Python for node-gyp
+    # Install Node Dependencies
     # ========================================
-    - name: Get Python Path
-      id: python
-      shell: bash
-      run: |
-        if [[ "${{ matrix.platform }}" == "windows" ]]; then
-          echo "path=C:\Python311\python.exe" >> $GITHUB_OUTPUT
-        else
-          PYTHON_PATH=$(which python3)
-          echo "path=$PYTHON_PATH" >> $GITHUB_OUTPUT
-          echo "Python found at: $PYTHON_PATH"
-        fi
-
-    - name: Configure node-gyp
-      shell: bash
-      run: |
-        npm config set python "${{ steps.python.outputs.path }}"
-        if [[ "${{ matrix.platform }}" == "windows" ]]; then
-          npm config set msvs_version 2022
-        fi
-        npm config list
-
-    - name: Install Node Dependencies
+    - name: Install Dependencies
       env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        npm install --no-audit --no-fund --no-package-lock
+        npm ci --no-fund --no-audit
 
     # ========================================
     # Build Application
@@ -182,62 +130,52 @@ jobs:
       shell: bash
       run: |
         if [ ! -d "out" ]; then
-          echo "Build failed: out directory not found"
+          echo "❌ Build failed: out directory not found"
           exit 1
         fi
-        echo "Build successful: $(find out -type f | wc -l) files generated"
-
-    - name: Rebuild Native Modules
-      run: |
-        if npm run | grep -q rebuild; then
-          npm run rebuild
-        fi
+        echo "✅ Build successful: $(find out -type f -name "*.js" | wc -l) files generated"
 
     # ========================================
     # Package Application
     # ========================================
-    - name: Package Electron Application
+    - name: Package Application
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        mkdir -p dist
+        # Ensure config exists
+        if [ ! -f "electron-builder.config.js" ] && [ ! -f ".electron-builder.config.js" ] && [ ! -f "electron-builder.config.cjs" ]; then
+          echo 'module.exports = { productName: "Prism Editor", appId: "com.prism-editor.app", directories: { output: "release" }, files: ["out/**/*", "resources/**/*", "package.json"] };' > electron-builder.config.js
+        fi
         
-        case "${{ matrix.platform }}" in
-          linux)
-            npx electron-builder --linux --x64 --publish never
-            ;;
-          windows)
-            npx electron-builder --windows --x64 --publish never
-            ;;
-          macos)
-            npx electron-builder --mac --x64 --arm64 --publish never
-            ;;
+        # Package with platform detection
+        case "${{ runner.os }}" in
+          Windows) PLATFORM_FLAG="--win" ;;
+          macOS)   PLATFORM_FLAG="--mac" ;;
+          Linux)   PLATFORM_FLAG="--linux" ;;
         esac
+        
+        npx electron-builder $PLATFORM_FLAG --publish never
 
     # ========================================
-    # Upload Results
+    # Upload Artifacts
     # ========================================
+    - name: Prepare Artifacts
+      shell: bash
+      run: |
+        # Create dist directory if not exists
+        mkdir -p dist
+        
+        # Find and copy artifacts
+        find release dist out -type f \( -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} dist/ \; 2>/dev/null || true
+        
+        echo "Artifacts found:"
+        ls -la dist/ || echo "No artifacts found"
+
     - name: Upload Build Artifacts
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: prism-editor-${{ matrix.platform }}-${{ github.sha }}
-        path: |
-          dist/
-          !dist/**/*.pdb
-          !dist/**/*.dbg
-          !dist/**/*.dSYM
+        name: prism-editor-${{ runner.os }}-${{ github.sha }}
+        path: dist/
         compression-level: 6
         retention-days: 7
-
-    - name: Upload Logs on Failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs-${{ matrix.platform }}-${{ github.sha }}
-        path: |
-          npm-debug.log*
-          *.log
-          out/*.log
-        retention-days: 14
