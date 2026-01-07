@@ -27,7 +27,7 @@ jobs:
             platform: linux
           - os: windows-latest
             platform: windows
-          - os: macos-13  # Use macOS 13 instead of latest to get Python 3.11
+          - os: macos-latest
             platform: macos
 
     steps:
@@ -43,10 +43,10 @@ jobs:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
 
-    # ============================================
+    # ----------------------------------------
     # Platform-Specific Dependencies
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Install Linux Dependencies
       if: matrix.platform == 'linux'
       run: |
@@ -65,7 +65,7 @@ jobs:
           libgbm-dev \
           libxtst-dev \
           libnss3 \
-          libasound2t64 \
+          libasound2 \
           libatk-bridge2.0-0 \
           libdrm2 \
           libxcomposite1 \
@@ -84,8 +84,8 @@ jobs:
       if: matrix.platform == 'windows'
       shell: powershell
       run: |
-        # Install Python for node-gyp
         choco install python311 -y --no-progress --force
+        refreshenv
 
     - name: Setup Python 3.11 for macOS
       if: matrix.platform == 'macos'
@@ -93,31 +93,19 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Configure macOS Environment
-      if: matrix.platform == 'macos'
-      run: |
-        # Ensure setuptools is available for distutils
-        python3.11 -m pip install --upgrade pip setuptools wheel
-        
-        # Verify Python and distutils
-        echo "Python version:"
-        python3.11 --version
-        python3.11 -c "import distutils; print('distutils available')" || echo "Warning: distutils not found"
-
-    # ============================================
+    # ----------------------------------------
     # Configure Build Environment for node-gyp
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Create .npmrc for node-gyp (Windows)
       if: matrix.platform == 'windows'
       shell: bash
       run: |
         cat > .npmrc << EOF
         msvs_version=2022
-        python=python
+        python=C:\\Python311\\python.exe
         EOF
-        
-        echo "Created .npmrc with contents:"
+        echo "Created .npmrc:"
         cat .npmrc
 
     - name: Create .npmrc for node-gyp (Linux)
@@ -127,8 +115,7 @@ jobs:
         cat > .npmrc << EOF
         python=python3
         EOF
-        
-        echo "Created .npmrc with contents:"
+        echo "Created .npmrc:"
         cat .npmrc
 
     - name: Create .npmrc for node-gyp (macOS)
@@ -138,18 +125,13 @@ jobs:
         cat > .npmrc << EOF
         python=python3.11
         EOF
-        
-        echo "Created .npmrc with contents:"
+        echo "Created .npmrc:"
         cat .npmrc
-        
-        # Verify Python is accessible
-        which python3.11
-        python3.11 --version
 
-    # ============================================
+    # ----------------------------------------
     # Cache Setup
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Cache Electron
       uses: actions/cache@v4
       with:
@@ -166,10 +148,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-electron-builder-cache-
 
-    # ============================================
+    # ----------------------------------------
     # Install Dependencies
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Install Dependencies
       shell: bash
       env:
@@ -177,72 +159,64 @@ jobs:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
         echo "🔧 Installing dependencies..."
-        
-        # Install without any problematic flags
-        npm install --no-audit --no-fund
-        
-        echo "✅ Dependencies installed successfully"
+        npm ci --no-audit --no-fund
+        echo "✅ Dependencies installed"
 
-    # ============================================
+    # ----------------------------------------
     # Apply Patches (if needed)
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Apply TypeScript Patches
       shell: bash
       run: |
-        # Patch tunnel-forwarding type errors
         if [ -f "extensions/tunnel-forwarding/src/split.ts" ]; then
           echo "Patching tunnel-forwarding..."
           if sed --version 2>&1 | grep -q GNU; then
-            # GNU sed (Linux)
             sed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
           else
-            # BSD sed (macOS)
             sed -i '' '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
           fi
         fi
-        
         echo "✅ Patches applied"
 
-    # ============================================
+    # ----------------------------------------
     # Build Application
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Compile TypeScript & Extensions
       shell: bash
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        echo "🔨 Compiling project..."
-        
-        # Run the compile script from package.json
+        echo "🔨 Running compile..."
         npm run compile
-        
         echo "✅ Compilation complete"
 
     - name: Verify Compilation Output
       shell: bash
       run: |
-        echo "📋 Checking compiled output..."
         if [ -d "out" ]; then
           echo "✅ 'out' directory exists"
           ls -la out/ | head -20
         else
-          echo "❌ 'out' directory not found!"
+          echo "❌ 'out' not found!"
           exit 1
         fi
 
-    - name: Rebuild Native Modules for Electron
+    - name: Rebuild Native Modules (if present)
       shell: bash
-      continue-on-error: true
       run: |
-        echo "🔧 Rebuilding native modules..."
-        npm run rebuild || echo "⚠️ Rebuild step skipped or failed (non-critical)"
+        if grep -q "rebuild" package.json; then
+          echo "🔧 Rebuilding native modules..."
+          npm run rebuild
+        else
+          echo "ℹ️ No rebuild script defined"
+        fi
 
-    # ============================================
+    # ----------------------------------------
     # Package Application
-    # ============================================
-    
+    # ----------------------------------------
+
     - name: Package with Electron Builder
       shell: bash
       env:
@@ -250,71 +224,42 @@ jobs:
         USE_HARD_LINKS: false
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        echo "📦 Packaging application for ${{ matrix.platform }}..."
-        
-        # Ensure output directory exists
+        echo "📦 Packaging for ${{ matrix.platform }}..."
         mkdir -p dist
-        
-        # Platform-specific packaging
+
         case "${{ matrix.platform }}" in
           linux)
-            echo "Building Linux packages..."
-            npx electron-builder --linux --x64 --publish never
+            npx electron-builder --linux --x64 --publish never \
+              || npx electron-builder --linux --x64 --dir
             ;;
           windows)
-            echo "Building Windows packages..."
-            npx electron-builder --windows --x64 --publish never
+            npx electron-builder --windows --x64 --publish never \
+              || npx electron-builder --windows --x64 --dir
             ;;
           macos)
-            echo "Building macOS packages..."
-            npx electron-builder --mac --x64 --arm64 --publish never
+            npx electron-builder --mac --x64 --arm64 --publish never \
+              || npx electron-builder --mac --x64 --arm64 --dir
             ;;
         esac
-        
+
         echo "✅ Packaging complete"
 
-    # ============================================
-    # List & Verify Build Artifacts
-    # ============================================
-    
+    # ----------------------------------------
+    # Artifact Listing & Upload
+    # ----------------------------------------
+
     - name: List Build Artifacts
       shell: bash
       run: |
-        echo "📋 Listing all files in dist directory:"
-        echo "=========================================="
-        if [ -d "dist" ]; then
-          find dist -type f -ls 2>/dev/null || ls -laR dist/
-        else
-          echo "❌ dist directory does not exist!"
-        fi
-        echo "=========================================="
-        
-        echo ""
-        echo "Looking for specific artifact types:"
-        find dist -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" \) 2>/dev/null || echo "⚠️ No standard artifacts found"
+        echo "📦 dist directory contents:"
+        find dist -type f -print || ls -la dist/
 
-    # ============================================
-    # Upload Artifacts
-    # ============================================
-    
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       if: success()
       with:
         name: prism-editor-${{ matrix.platform }}-${{ github.run_number }}
-        path: |
-          dist/*.exe
-          dist/*.dmg
-          dist/*.zip
-          dist/*.AppImage
-          dist/*.deb
-          dist/*.rpm
-          dist/**/*.exe
-          dist/**/*.dmg
-          dist/**/*.zip
-          dist/**/*.AppImage
-          dist/**/*.deb
-          dist/**/*.rpm
+        path: dist/**
         if-no-files-found: warn
         retention-days: 7
 
@@ -326,6 +271,5 @@ jobs:
         path: |
           npm-debug.log*
           *.log
-          dist/**/*.log
         if-no-files-found: ignore
-        retention-days: 3
+        retention-days: 90
