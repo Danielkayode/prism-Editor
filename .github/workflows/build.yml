@@ -27,6 +27,12 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
+    # FIX: Use Python 3.11 explicitly to fix 'distutils' error on macOS/Linux
+    - name: Setup Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11' 
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -34,28 +40,22 @@ jobs:
         cache: 'npm'
         cache-dependency-path: '**/package-lock.json'
 
-    # --- Platform Specific Setup ---
-    - name: Install Windows Build Tools
-      if: runner.os == 'Windows'
-      shell: powershell
-      run: |
-        # Simplified for reliability
-        npm install --global --production windows-build-tools --vs2017
-
+    # FIX: Correct package names for Ubuntu 24.04
     - name: Install Linux Dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libgtk-3-dev libxss-dev libasound2
+        sudo apt-get install -y build-essential libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libgtk-3-dev libxss-dev libasound2-dev
 
-    - name: Install macOS Dependencies
-      if: runner.os == 'macOS'
+    # FIX: Setup global node-gyp to handle newer Node versions
+    - name: Update Build Tools
+      shell: bash
       run: |
-        # macOS GitHub runners come with Xcode pre-installed.
-        # We just need to ensure python is available for node-gyp
-        brew install python || true
+        npm install -g node-gyp
+        # Tell npm to use the Python 3.11 we installed earlier
+        echo "PYTHON=python" >> $GITHUB_ENV
+        echo "npm_config_python=python" >> $GITHUB_ENV
 
-    # --- Build Process ---
     - name: Clean npm cache
       shell: bash
       run: npm cache clean --force
@@ -64,18 +64,17 @@ jobs:
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        PYTHON: python3
       run: |
-        # REMOVED --ignore-scripts so native modules compile correctly
-        # REMOVED audit fix --force to prevent breaking package versions
+        # --no-audit prevents breaking changes
+        # Removed --ignore-scripts so native modules compile
         npm install --no-fund --no-audit
 
     - name: Ensure Electron Builder Config
       shell: bash
       run: |
-        # Only create config if it strictly doesn't exist
         if [ ! -f "electron-builder.config.js" ] && [ ! -f "electron-builder.config.cjs" ] && [ ! -f ".electron-builder.config.js" ] && [ ! -f ".electron-builder.config.cjs" ]; then
           echo "No config found. Creating default electron-builder.config.cjs..."
+          # Added identity: null for mac to skip signing errors
           echo 'module.exports = {
             productName: "Prism Editor",
             appId: "com.prism-editor.app",
@@ -94,13 +93,11 @@ jobs:
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        # Try standard compile
         if npm run compile --if-present; then
           echo "Compile successful"
         elif npm run build --if-present; then
           echo "Build successful"
         else
-          # If no script exists, assume it's a raw JS project or pre-built
           echo "No compile/build script found, proceeding..."
         fi
 
@@ -117,8 +114,7 @@ jobs:
 
         echo "Packaging for $RUNNER_OS with flags: $FLAGS"
 
-        # Try packaging using npx electron-builder directly to avoid npm script confusion
-        # We explicitly point to the config if we created one
+        # Explicitly use npx electron-builder
         if [ -f "electron-builder.config.cjs" ]; then
            npx electron-builder build $FLAGS --config electron-builder.config.cjs
         else
