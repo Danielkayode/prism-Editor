@@ -34,116 +34,46 @@ jobs:
         cache: 'npm'
         cache-dependency-path: '**/package-lock.json'
 
+    # --- Windows Setup ---
     - name: Install Windows Build Tools
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        Write-Output "Installing Visual Studio Build Tools..."
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile "vs_BuildTools.exe"
-        Start-Process -FilePath "vs_BuildTools.exe" -ArgumentList "--quiet", "--wait", "--norestart", "--nocache", "--installPath", "C:\BuildTools", "--add", "Microsoft.VisualStudio.Workload.VCTools", "--add", "Microsoft.VisualStudio.Component.Windows10SDK.19041", "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "--includeRecommended" -NoNewWindow -Wait
-        # Install Python 3.11
-        Write-Output "Installing Python 3.11..."
-        winget install --id Python.Python.3.11 --silent --accept-source-agreements
-        # Clean up
-        Remove-Item -Path "vs_BuildTools.exe" -Force
-        Write-Output "Build tools installation complete!"
-        # Set environment variables for node-gyp
-        echo "npm_config_msvs_version=2022" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-        echo "npm_config_python=C:\\Python311\\python.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        # Standard Setup for Native Modules on Windows
+        npm config set msvs_version 2022
+        npm config set python python3
 
+    # --- Linux Setup ---
     - name: Install Linux Dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          libx11-dev \
-          libxkbfile-dev \
-          libsecret-1-dev \
-          libkrb5-dev \
-          libnotify-dev \
-          libgtk-3-dev \
-          libxtst-dev \
-          libnss3 \
-          libnspr4 \
-          libatk1.0-dev \
-          libatk-bridge2.0-dev \
-          libcups2-dev \
-          libdrm-dev \
-          libxrandr-dev \
-          libgbm-dev \
-          libasound2-dev \
-          libpulse-dev \
-          build-essential \
-          python3
+        sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libnotify-dev libgtk-3-dev libxtst-dev libnss3 libasound2-dev rpm
 
+    # --- macOS Setup ---
     - name: Install macOS Dependencies
       if: runner.os == 'macOS'
       run: |
-        # Ensure Xcode command line tools are installed
-        xcode-select --install 2>/dev/null || true
-        # Install additional tools
-        brew update
-        brew install pkg-config
+        # Python is pre-installed on runners, just need build tools
+        brew install python
+        npm config set python python3
 
     - name: Clean npm cache
       shell: bash
-      run: |
-        npm cache clean --force || echo "Cache clean failed, continuing..."
+      run: npm cache clean --force || true
 
-    - name: Install Dependencies and Fix Config
+    # --- FIXED: Removed --ignore-scripts and configuration overwrite ---
+    - name: Install Dependencies
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PYTHON: python3
       run: |
-        echo "Installing dependencies with Node.js $(node -v)"
-        npm install --no-fund --no-audit --ignore-scripts --prefer-offline
+        echo "Installing dependencies..."
+        # CRITICAL FIX: Removed --ignore-scripts so native modules build
+        npm install --no-fund --no-audit
 
-        echo "Fixing Electron Builder config file format..."
-
-        CONFIG_FILE=".electron-builder.config.js"
-        CONFIG_FILE_CJS=".electron-builder.config.cjs"
-
-        # Check if the config file exists and is a .js file
-        if [ -f "$CONFIG_FILE" ]; then
-          echo "Found config file: $CONFIG_FILE"
-          echo "Renaming to .cjs extension..."
-          mv "$CONFIG_FILE" "$CONFIG_FILE_CJS"
-        elif [ ! -f "$CONFIG_FILE" ] && [ ! -f "$CONFIG_FILE_CJS" ]; then
-          echo "No config file found, creating new one..."
-
-          # Create the config file using echo with proper escaping
-          echo 'module.exports = {
-            productName: "Prism Editor",
-            appId: "com.prism-editor.app",
-            directories: {
-              output: "release"
-            },
-            files: [
-              "out/**/*",
-              "resources/**/*",
-              "package.json"
-            ],
-            win: {
-              target: "nsis"
-            },
-            mac: {
-              target: "dmg"
-            },
-            linux: {
-              target: "AppImage"
-            }
-          };' > "$CONFIG_FILE_CJS"
-
-          echo "✅ Created new electron-builder.config.cjs"
-        fi
-
-    - name: Fix Security Vulnerabilities
-      shell: bash
-      run: |
-        echo "Running npm audit fix..."
-        npm audit fix --no-fund || echo "Non-critical audit fix failed, continuing..."
-        npm audit fix --force --no-fund || echo "Force audit fix failed, continuing..."
+    # --- FIXED: Removed 'npm audit fix --force' as it breaks builds ---
 
     - name: Compile Project
       shell: bash
@@ -155,119 +85,53 @@ jobs:
           echo "✅ Compilation successful!"
         else
           echo "⚠️ Standard compile failed, trying fallback build command..."
-          if npm run build --if-present; then
-            echo "✅ Fallback build successful!"
-          else
-            echo "⚠️ Both compile and build commands failed. This might be expected for some VS Code forks."
-          fi
+          npm run build --if-present
         fi
 
     - name: Package Application
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        USE_HARD_LINKS: false
       run: |
         echo "Packaging application for ${{ runner.os }}..."
-
-        # Set platform-specific flags
+        
+        # Define flags based on OS
         if [ "$RUNNER_OS" = "Windows" ]; then
           PLATFORM_FLAG="--win"
-          echo "Using Windows platform flag: $PLATFORM_FLAG"
         elif [ "$RUNNER_OS" = "macOS" ]; then
           PLATFORM_FLAG="--mac"
-          echo "Using macOS platform flag: $PLATFORM_FLAG"
         else
           PLATFORM_FLAG="--linux"
-          echo "Using Linux platform flag: $PLATFORM_FLAG"
         fi
 
-        # Run packaging command with fallback logic
-        echo "Running packaging command..."
-
-        # Try with explicit config file if it exists
-        if [ -f "electron-builder.config.cjs" ]; then
-          echo "Using config file: electron-builder.config.cjs"
-          if npm run package -- $PLATFORM_FLAG --config electron-builder.config.cjs; then
-            echo "✅ Packaging successful with config file!"
-            exit 0
-          fi
-        elif [ -f ".electron-builder.config.cjs" ]; then
-          echo "Using config file: .electron-builder.config.cjs"
-          if npm run package -- $PLATFORM_FLAG --config .electron-builder.config.cjs; then
-            echo "✅ Packaging successful with config file!"
-            exit 0
-          fi
-        fi
-
-        # Fallback 1: Try without explicit config
-        echo "⚠️ Config file method failed, trying without explicit config..."
+        # Run Package
+        echo "Running electron-builder with flag: $PLATFORM_FLAG"
+        
+        # Try generic package command first
         if npm run package -- $PLATFORM_FLAG; then
-          echo "✅ Packaging successful without explicit config!"
-          exit 0
+           exit 0
         fi
+        
+        # Fallback to direct electron-builder
+        npx electron-builder $PLATFORM_FLAG --publish never
 
-        # Fallback 2: Direct electron-builder call
-        echo "⚠️ Standard package command failed, trying direct electron-builder..."
-        if npx electron-builder $PLATFORM_FLAG; then
-          echo "✅ Direct electron-builder successful!"
-          exit 0
-        fi
-
-        # Fallback 3: Check if build artifacts exist anyway
-        echo "⚠️ All packaging methods failed. Checking for existing build artifacts..."
-
-        # Check common build artifact locations
-        if [ -d "release" ] || [ -d "out" ] || [ -d "dist" ] || [ -d "build" ]; then
-          echo "✅ Found build directories. Continuing with existing artifacts..."
-          exit 0
-        fi
-
-        echo "❌ No build artifacts found and all packaging methods failed"
-        exit 1
-
-    - name: Find and Prepare Artifacts (Linux/macOS)
-      if: runner.os != 'Windows'
-      shell: bash
-      id: find-artifacts
-      run: |
-        echo "Searching for build artifacts..."
-
-        # Platform-specific artifact search
-        if [ "$RUNNER_OS" = "Linux" ]; then
-          ARTIFACT_PATTERN="*.AppImage *.tar.gz *.deb *.rpm *.zip"
-        elif [ "$RUNNER_OS" = "macOS" ]; then
-          ARTIFACT_PATTERN="*.dmg *.zip *.tar.gz *.app"
-        fi
-
-        # Search for artifacts
-        ARTIFACT_PATH=""
-        for dir in release dist out build products; do
-          if [ -d "$dir" ]; then
-            found_file=$(find "$dir" -type f -iname "$ARTIFACT_PATTERN" -print -quit)
-            if [ -n "$found_file" ]; then
-              ARTIFACT_PATH="$found_file"
-              break
-            fi
-          fi
-        done
-
-        if [ -n "$ARTIFACT_PATH" ]; then
-          echo "✅ Found artifact at $ARTIFACT_PATH"
-          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
-        else
-          echo "❌ No artifacts found."
-          exit 1
-
-    - name: Upload Artifacts
-      if: runner.os != 'Windows' && env.ARTIFACT_PATH
+    # --- FIXED: Simplified Artifact Upload (Replaces the broken 'find' script) ---
+    - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ runner.os }}-build
-        path: ${{ env.ARTIFACT_PATH }}
-
-    - name: Upload Windows Artifacts
-      if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-build
-        path: "release/*"
+        name: Prism-Editor-${{ matrix.os }}
+        path: |
+          dist/*.exe
+          dist/*.dmg
+          dist/*.zip
+          dist/*.AppImage
+          dist/*.deb
+          dist/*.rpm
+          dist/*.snap
+          release/*.exe
+          release/*.dmg
+          release/*.AppImage
+          out/make/**/*
+        if-no-files-found: warn
+        retention-days: 90
