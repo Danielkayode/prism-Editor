@@ -78,8 +78,6 @@ jobs:
           fakeroot \
           rpm \
           dpkg
-        # Configure Python for node-gyp
-        npm config set python python3
 
     - name: Configure Windows Environment
       if: matrix.platform == 'windows'
@@ -87,19 +85,50 @@ jobs:
       run: |
         # Install Python for node-gyp
         choco install python3 -y --no-progress
-        npm config set msvs_version 2022
-        npm config set python python
-        
-        # Add to PATH
-        $env:Path = "C:\Python311;C:\Python311\Scripts;" + $env:Path
-        echo "PATH=$env:Path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - name: Configure macOS Environment
       if: matrix.platform == 'macos'
       run: |
         # Install Python 3
         brew install python@3.11 || true
+
+    # ============================================
+    # Configure npm for node-gyp BEFORE install
+    # ============================================
+    
+    - name: Configure npm for node-gyp (Windows)
+      if: matrix.platform == 'windows'
+      shell: bash
+      run: |
+        # Set npm config (NOT environment variables or flags)
+        npm config set msvs_version 2022
+        npm config set python python
+        
+        # Verify configuration
+        echo "npm config list:"
+        npm config list
+
+    - name: Configure npm for node-gyp (Linux)
+      if: matrix.platform == 'linux'
+      shell: bash
+      run: |
+        # Set npm config (NOT environment variables or flags)
         npm config set python python3
+        
+        # Verify configuration
+        echo "npm config list:"
+        npm config list
+
+    - name: Configure npm for node-gyp (macOS)
+      if: matrix.platform == 'macos'
+      shell: bash
+      run: |
+        # Set npm config (NOT environment variables or flags)
+        npm config set python python3
+        
+        # Verify configuration
+        echo "npm config list:"
+        npm config list
 
     # ============================================
     # Cache Setup
@@ -125,7 +154,7 @@ jobs:
     # Install Dependencies
     # ============================================
     
-    - name: Clean Install Dependencies
+    - name: Install Dependencies
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -133,11 +162,9 @@ jobs:
       run: |
         echo "🔧 Installing dependencies..."
         
-        # Clean any previous installations
-        rm -rf node_modules package-lock.json
-        
-        # Fresh install
-        npm install --legacy-peer-deps --no-audit --no-fund
+        # DO NOT use --legacy-peer-deps or any custom flags that might conflict
+        # The npm config is already set above
+        npm install --no-audit --no-fund
         
         echo "✅ Dependencies installed successfully"
 
@@ -151,12 +178,15 @@ jobs:
         # Patch tunnel-forwarding type errors
         if [ -f "extensions/tunnel-forwarding/src/split.ts" ]; then
           echo "Patching tunnel-forwarding..."
-          sed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts 2>/dev/null || \
-          sed -i '' '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts 2>/dev/null || \
-          echo "// @ts-nocheck" | cat - extensions/tunnel-forwarding/src/split.ts > temp && mv temp extensions/tunnel-forwarding/src/split.ts
+          if sed --version 2>&1 | grep -q GNU; then
+            # GNU sed (Linux)
+            sed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
+          else
+            # BSD sed (macOS)
+            sed -i '' '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
+          fi
         fi
         
-        # Patch any other known issues
         echo "✅ Patches applied"
 
     # ============================================
@@ -170,26 +200,29 @@ jobs:
       run: |
         echo "🔨 Compiling project..."
         
-        # VSCode compilation
-        if [ -f "node_modules/.bin/gulp" ] || command -v gulp &> /dev/null; then
-          # Use gulp if available (standard VSCode build)
-          npm run compile 2>&1 || npx gulp compile-build 2>&1 || npx gulp vscode-linux-x64 2>&1
-        else
-          # Fallback to webpack/esbuild
-          npm run compile 2>&1 || npx webpack --mode production 2>&1
-        fi
+        # Run the compile script from package.json
+        npm run compile
         
         echo "✅ Compilation complete"
 
-    - name: Download Electron & Build Native Modules
+    - name: Verify Compilation Output
       shell: bash
       run: |
-        echo "📦 Preparing Electron..."
-        
-        # Install/rebuild native modules for Electron
-        npx electron-rebuild || echo "⚠️ electron-rebuild not needed or failed"
-        
-        echo "✅ Electron prepared"
+        echo "📋 Checking compiled output..."
+        if [ -d "out" ]; then
+          echo "✅ 'out' directory exists"
+          ls -la out/ | head -20
+        else
+          echo "❌ 'out' directory not found!"
+          exit 1
+        fi
+
+    - name: Rebuild Native Modules for Electron
+      shell: bash
+      continue-on-error: true
+      run: |
+        echo "🔧 Rebuilding native modules..."
+        npm run rebuild || echo "⚠️ Rebuild step skipped or failed (non-critical)"
 
     # ============================================
     # Package Application
@@ -210,20 +243,16 @@ jobs:
         # Platform-specific packaging
         case "${{ matrix.platform }}" in
           linux)
-            npx electron-builder --linux --x64 --publish never \
-              --config.linux.target=AppImage \
-              --config.linux.target=deb \
-              --config.linux.target=rpm
+            echo "Building Linux packages..."
+            npx electron-builder --linux --x64 --publish never
             ;;
           windows)
-            npx electron-builder --windows --x64 --publish never \
-              --config.win.target=nsis \
-              --config.win.target=portable
+            echo "Building Windows packages..."
+            npx electron-builder --windows --x64 --publish never
             ;;
           macos)
-            npx electron-builder --mac --x64 --arm64 --publish never \
-              --config.mac.target=dmg \
-              --config.mac.target=zip
+            echo "Building macOS packages..."
+            npx electron-builder --mac --x64 --arm64 --publish never
             ;;
         esac
         
@@ -236,33 +265,45 @@ jobs:
     - name: List Build Artifacts
       shell: bash
       run: |
-        echo "📋 Build artifacts:"
-        echo "===================="
-        find dist -type f -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" 2>/dev/null || echo "No artifacts found yet"
-        find release -type f 2>/dev/null || echo "No release folder"
-        echo "===================="
+        echo "📋 Listing all files in dist directory:"
+        echo "=========================================="
+        if [ -d "dist" ]; then
+          find dist -type f -ls 2>/dev/null || ls -laR dist/
+        else
+          echo "❌ dist directory does not exist!"
+        fi
+        echo "=========================================="
+        
+        echo ""
+        echo "Looking for specific artifact types:"
+        find dist -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" \) 2>/dev/null || echo "⚠️ No standard artifacts found"
 
     # ============================================
     # Upload Artifacts
     # ============================================
     
-    - name: Upload Artifacts
+    - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
-      if: always()
+      if: success()
       with:
         name: prism-editor-${{ matrix.platform }}-${{ github.run_number }}
         path: |
+          dist/*.exe
+          dist/*.dmg
+          dist/*.zip
+          dist/*.AppImage
+          dist/*.deb
+          dist/*.rpm
           dist/**/*.exe
           dist/**/*.dmg
           dist/**/*.zip
           dist/**/*.AppImage
           dist/**/*.deb
           dist/**/*.rpm
-          dist/**/*.snap
         if-no-files-found: warn
         retention-days: 7
 
-    - name: Upload Logs on Failure
+    - name: Upload Build Logs on Failure
       uses: actions/upload-artifact@v4
       if: failure()
       with:
@@ -272,4 +313,4 @@ jobs:
           *.log
           dist/**/*.log
         if-no-files-found: ignore
-        retention-days: 90
+        retention-days: 3
