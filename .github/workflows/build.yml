@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20.18.0'  # Fixed specific version
+  NODE_VERSION: '20.18.0'
 
 jobs:
   build:
@@ -68,19 +68,26 @@ jobs:
           pwsh -Command "
             \$$nodeUrl = 'https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-win-x64.zip';
             Write-Host \"Downloading \$$nodeUrl\";
+            if (Test-Path 'node.zip') { Remove-Item node.zip };
             Invoke-WebRequest -Uri \$$nodeUrl -OutFile node.zip;
+            if (Test-Path 'C:\\node') { Remove-Item -Recurse -Force C:\\node };
             Expand-Archive node.zip -DestinationPath C:\\node;
             Add-Content -Path \$$env:GITHUB_PATH -Value 'C:\\node\\node-v${{ env.NODE_VERSION }}-win-x64';
             Add-Content -Path \$$env:GITHUB_PATH -Value 'C:\\node\\node-v${{ env.NODE_VERSION }}-win-x64\\node_modules\\npm\\bin';
           "
         elif [[ "${{ matrix.platform }}" == "macos" ]]; then
           # macOS
+          if [ -d "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64" ]; then
+            rm -rf "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64"
+          fi
           curl -fsSL "https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-darwin-arm64.tar.gz" | tar -xz
           echo "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64/bin" >> $GITHUB_PATH
         else
           # Linux - Use official setup
-          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-          sudo apt-get install -y nodejs
+          if ! command -v node &> /dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+          fi
         fi
 
     - name: Verify Node.js Installation
@@ -88,6 +95,8 @@ jobs:
       run: |
         node --version
         npm --version
+        which node
+        which npm
 
     # ========================================
     # Install System Dependencies
@@ -97,14 +106,32 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential python3 python3-pip \
-          libx11-dev libxkbfile-dev libsecret-1-dev \
-          libkrb5-dev libnotify-dev libgtk-3-dev \
-          libgbm-dev libxtst-dev libnss3 \
-          libasound2 libatk-bridge2.0-0 libdrm2 \
-          libxcomposite1 libxdamage1 libxrandr2 \
-          libpango-1.0-0 libcairo2 libcups2 \
-          libxss1 libxcursor1 fakeroot rpm dpkg
+          build-essential \
+          python3 \
+          python3-pip \
+          libx11-dev \
+          libxkbfile-dev \
+          libsecret-1-dev \
+          libkrb5-dev \
+          libnotify-dev \
+          libgtk-3-dev \
+          libgbm-dev \
+          libxtst-dev \
+          libnss3 \
+          libasound2t64 \
+          libatk-bridge2.0-0 \
+          libdrm2 \
+          libxcomposite1 \
+          libxdamage1 \
+          libxrandr2 \
+          libpango-1.0-0 \
+          libcairo2 \
+          libcups2 \
+          libxss1 \
+          libxcursor1 \
+          fakeroot \
+          rpm \
+          dpkg
 
     - name: Install Windows Dependencies
       if: matrix.platform == 'windows'
@@ -116,20 +143,26 @@ jobs:
     # ========================================
     # Configure Python for node-gyp
     # ========================================
-    - name: Configure node-gyp (Unix)
-      if: matrix.platform != 'windows'
+    - name: Get Python Path
+      id: python
       shell: bash
       run: |
-        which python3
-        python3 --version
-        npm config set python python3
+        if [[ "${{ matrix.platform }}" == "windows" ]]; then
+          echo "path=C:\Python311\python.exe" >> $GITHUB_OUTPUT
+        else
+          PYTHON_PATH=$(which python3)
+          echo "path=$PYTHON_PATH" >> $GITHUB_OUTPUT
+          echo "Python found at: $PYTHON_PATH"
+        fi
 
-    - name: Configure node-gyp (Windows)
-      if: matrix.platform == 'windows'
-      shell: pwsh
+    - name: Configure node-gyp
+      shell: bash
       run: |
-        npm config set python "C:\Python311\python.exe"
-        npm config set msvs_version 2022
+        npm config set python "${{ steps.python.outputs.path }}"
+        if [[ "${{ matrix.platform }}" == "windows" ]]; then
+          npm config set msvs_version 2022
+        fi
+        npm config list
 
     - name: Install Node Dependencies
       env:
