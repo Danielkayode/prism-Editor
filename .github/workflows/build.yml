@@ -34,63 +34,6 @@ jobs:
         cache: 'npm'
         cache-dependency-path: '**/package-lock.json'
 
-    - name: Install Windows Build Tools
-      if: runner.os == 'Windows'
-      shell: powershell
-      run: |
-        Write-Output "Installing Visual Studio Build Tools..."
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile "vs_BuildTools.exe"
-        Start-Process -FilePath "vs_BuildTools.exe" -ArgumentList "--quiet", "--wait", "--norestart", "--nocache", "--installPath", "C:\BuildTools", "--add", "Microsoft.VisualStudio.Workload.VCTools", "--add", "Microsoft.VisualStudio.Component.Windows10SDK.19041", "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "--includeRecommended" -NoNewWindow -Wait
-        # Install Python 3.11
-        Write-Output "Installing Python 3.11..."
-        winget install --id Python.Python.3.11 --silent --accept-source-agreements
-        # Clean up
-        Remove-Item -Path "vs_BuildTools.exe" -Force
-        Write-Output "Build tools installation complete!"
-        # Set environment variables for node-gyp
-        echo "npm_config_msvs_version=2022" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-        echo "npm_config_python=C:\\Python311\\python.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-    - name: Install Linux Dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libx11-dev \
-          libxkbfile-dev \
-          libsecret-1-dev \
-          libkrb5-dev \
-          libnotify-dev \
-          libgtk-3-dev \
-          libxtst-dev \
-          libnss3 \
-          libnspr4 \
-          libatk1.0-dev \
-          libatk-bridge2.0-dev \
-          libcups2-dev \
-          libdrm-dev \
-          libxrandr-dev \
-          libgbm-dev \
-          libasound2-dev \
-          libpulse-dev \
-          build-essential \
-          python3
-
-    - name: Install macOS Dependencies
-      if: runner.os == 'macOS'
-      run: |
-        # Ensure Xcode command line tools are installed
-        xcode-select --install 2>/dev/null || true
-        # Install additional tools
-        brew update
-        brew install pkg-config
-
-    - name: Clean npm cache
-      shell: bash
-      run: |
-        npm cache clean --force || echo "Cache clean failed, continuing..."
-
     - name: Install Dependencies and Fix Config
       shell: bash
       env:
@@ -136,30 +79,6 @@ jobs:
           };' > "$CONFIG_FILE_CJS"
 
           echo "✅ Created new electron-builder.config.cjs"
-        fi
-
-    - name: Fix Security Vulnerabilities
-      shell: bash
-      run: |
-        echo "Running npm audit fix..."
-        npm audit fix --no-fund || echo "Non-critical audit fix failed, continuing..."
-        npm audit fix --force --no-fund || echo "Force audit fix failed, continuing..."
-
-    - name: Compile Project
-      shell: bash
-      env:
-        NODE_OPTIONS: --max-old-space-size=8192
-      run: |
-        echo "Starting compilation..."
-        if npm run compile --if-present; then
-          echo "✅ Compilation successful!"
-        else
-          echo "⚠️ Standard compile failed, trying fallback build command..."
-          if npm run build --if-present; then
-            echo "✅ Fallback build successful!"
-          else
-            echo "⚠️ Both compile and build commands failed. This might be expected for some VS Code forks."
-          fi
         fi
 
     - name: Package Application
@@ -257,3 +176,17 @@ jobs:
         else
           echo "❌ No artifacts found."
           exit 1
+
+    - name: Upload Artifacts
+      if: runner.os != 'Windows' && env.ARTIFACT_PATH
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ runner.os }}-build
+        path: ${{ env.ARTIFACT_PATH }}
+
+    - name: Upload Windows Artifacts
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-build
+        path: "release/*"
