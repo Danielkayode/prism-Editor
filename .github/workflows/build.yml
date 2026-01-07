@@ -35,13 +35,13 @@ jobs:
         cache-dependency-path: '**/package-lock.json'
 
     # --- Windows Setup ---
-    - name: Install Windows Build Tools
+    - name: Configure Windows Build Env
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        # Standard Setup for Native Modules on Windows
-        npm config set msvs_version 2022
-        npm config set python python3
+        # Set environment variables for node-gyp instead of using 'npm config set'
+        echo "npm_config_msvs_version=2022" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        echo "npm_config_python=python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     # --- Linux Setup ---
     - name: Install Linux Dependencies
@@ -49,31 +49,29 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libnotify-dev libgtk-3-dev libxtst-dev libnss3 libasound2-dev rpm
+        # Set env var for node-gyp
+        echo "npm_config_python=python3" >> $GITHUB_ENV
 
     # --- macOS Setup ---
     - name: Install macOS Dependencies
       if: runner.os == 'macOS'
       run: |
-        # Python is pre-installed on runners, just need build tools
-        brew install python
-        npm config set python python3
+        # Set env var for node-gyp
+        echo "npm_config_python=python3" >> $GITHUB_ENV
 
     - name: Clean npm cache
       shell: bash
       run: npm cache clean --force || true
 
-    # --- FIXED: Removed --ignore-scripts and configuration overwrite ---
     - name: Install Dependencies
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        PYTHON: python3
       run: |
         echo "Installing dependencies..."
-        # CRITICAL FIX: Removed --ignore-scripts so native modules build
-        npm install --no-fund --no-audit
-
-    # --- FIXED: Removed 'npm audit fix --force' as it breaks builds ---
+        # Removed --ignore-scripts so native modules build correctly
+        # Removed --no-audit to prevent lockfile issues, but kept --no-fund for cleaner logs
+        npm install --no-fund
 
     - name: Compile Project
       shell: bash
@@ -92,11 +90,9 @@ jobs:
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        USE_HARD_LINKS: false
       run: |
         echo "Packaging application for ${{ runner.os }}..."
         
-        # Define flags based on OS
         if [ "$RUNNER_OS" = "Windows" ]; then
           PLATFORM_FLAG="--win"
         elif [ "$RUNNER_OS" = "macOS" ]; then
@@ -105,7 +101,6 @@ jobs:
           PLATFORM_FLAG="--linux"
         fi
 
-        # Run Package
         echo "Running electron-builder with flag: $PLATFORM_FLAG"
         
         # Try generic package command first
@@ -116,7 +111,6 @@ jobs:
         # Fallback to direct electron-builder
         npx electron-builder $PLATFORM_FLAG --publish never
 
-    # --- FIXED: Simplified Artifact Upload (Replaces the broken 'find' script) ---
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -134,4 +128,4 @@ jobs:
           release/*.AppImage
           out/make/**/*
         if-no-files-found: warn
-        retention-days: 90
+        retention-days: 5
