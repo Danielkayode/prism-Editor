@@ -26,6 +26,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: '20.18.0'  # Fixed specific version
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -39,7 +42,6 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
-            image: node:20-bullseye
           - os: windows-latest
             platform: windows
           - os: macos-latest
@@ -55,48 +57,56 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # Container setup for Linux (includes Node.js + Python)
-    - name: Setup Linux Environment
-      if: matrix.platform == 'linux'
+    # ========================================
+    # Install Node.js (Cross-platform)
+    # ========================================
+    - name: Install Node.js
+      shell: bash
       run: |
-        echo "NODE_BIN=/usr/local/bin" >> $GITHUB_ENV
-        
-    - name: Setup Node.js (Windows)
-      if: matrix.platform == 'windows'
-      shell: pwsh
-      run: |
-        # Install Node.js 20 using direct download
-        $nodeUrl = "https://nodejs.org/dist/v${env:NODE_VERSION}/node-v${env:NODE_VERSION}-win-x64.zip"
-        Invoke-WebRequest -Uri $nodeUrl -OutFile node.zip
-        Expand-Archive node.zip -DestinationPath C:\node
-        echo "C:\node\node-v${env:NODE_VERSION}-win-x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        
-    - name: Setup Node.js (macOS)
-      if: matrix.platform == 'macos'
-      run: |
-        # Install Node.js 20 using direct download
-        curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz" | tar -xz
-        echo "$GITHUB_WORKSPACE/node-v${NODE_VERSION}-darwin-arm64/bin" >> $GITHUB_PATH
+        if [[ "${{ matrix.platform }}" == "windows" ]]; then
+          # Windows - Use PowerShell within bash
+          pwsh -Command "
+            \$$nodeUrl = 'https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-win-x64.zip';
+            Write-Host \"Downloading \$$nodeUrl\";
+            Invoke-WebRequest -Uri \$$nodeUrl -OutFile node.zip;
+            Expand-Archive node.zip -DestinationPath C:\\node;
+            Add-Content -Path \$$env:GITHUB_PATH -Value 'C:\\node\\node-v${{ env.NODE_VERSION }}-win-x64';
+            Add-Content -Path \$$env:GITHUB_PATH -Value 'C:\\node\\node-v${{ env.NODE_VERSION }}-win-x64\\node_modules\\npm\\bin';
+          "
+        elif [[ "${{ matrix.platform }}" == "macos" ]]; then
+          # macOS
+          curl -fsSL "https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-darwin-arm64.tar.gz" | tar -xz
+          echo "$GITHUB_WORKSPACE/node-v${{ env.NODE_VERSION }}-darwin-arm64/bin" >> $GITHUB_PATH
+        else
+          # Linux - Use official setup
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+        fi
 
     - name: Verify Node.js Installation
+      shell: bash
       run: |
         node --version
         npm --version
 
     # ========================================
-    # Install Dependencies
+    # Install System Dependencies
     # ========================================
-    - name: Install Dependencies (Linux)
+    - name: Install Linux Dependencies
       if: matrix.platform == 'linux'
       run: |
-        apt-get update && apt-get install -y \
-          build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev \
-          libkrb5-dev libnotify-dev libgtk-3-dev libgbm-dev libxtst-dev \
-          libnss3 libasound2 libatk-bridge2.0-0 libdrm2 libxcomposite1 \
-          libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 libcups2 \
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential python3 python3-pip \
+          libx11-dev libxkbfile-dev libsecret-1-dev \
+          libkrb5-dev libnotify-dev libgtk-3-dev \
+          libgbm-dev libxtst-dev libnss3 \
+          libasound2 libatk-bridge2.0-0 libdrm2 \
+          libxcomposite1 libxdamage1 libxrandr2 \
+          libpango-1.0-0 libcairo2 libcups2 \
           libxss1 libxcursor1 fakeroot rpm dpkg
 
-    - name: Install Dependencies (Windows)
+    - name: Install Windows Dependencies
       if: matrix.platform == 'windows'
       shell: pwsh
       run: |
@@ -104,21 +114,29 @@ jobs:
         echo "C:\Python311" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     # ========================================
-    # Configure Build
+    # Configure Python for node-gyp
     # ========================================
-    - name: Configure node-gyp
+    - name: Configure node-gyp (Unix)
+      if: matrix.platform != 'windows'
       shell: bash
       run: |
-        npm config set python python3 --global
-        npm config set msvs_version 2022 --global
-        
+        which python3
+        python3 --version
+        npm config set python python3
+
+    - name: Configure node-gyp (Windows)
+      if: matrix.platform == 'windows'
+      shell: pwsh
+      run: |
+        npm config set python "C:\Python311\python.exe"
+        npm config set msvs_version 2022
+
     - name: Install Node Dependencies
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        # Use npm install since no lock file exists
         npm install --no-audit --no-fund --no-package-lock
-        
+
     # ========================================
     # Build Application
     # ========================================
@@ -126,21 +144,22 @@ jobs:
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: npm run compile
-        
+
     - name: Verify Build Output
+      shell: bash
       run: |
         if [ ! -d "out" ]; then
           echo "Build failed: out directory not found"
           exit 1
         fi
-        echo "Build successful: $(ls -la out/ | wc -l) files generated"
-        
+        echo "Build successful: $(find out -type f | wc -l) files generated"
+
     - name: Rebuild Native Modules
       run: |
         if npm run | grep -q rebuild; then
           npm run rebuild
         fi
-        
+
     # ========================================
     # Package Application
     # ========================================
@@ -162,7 +181,7 @@ jobs:
             npx electron-builder --mac --x64 --arm64 --publish never
             ;;
         esac
-        
+
     # ========================================
     # Upload Results
     # ========================================
@@ -175,9 +194,10 @@ jobs:
           dist/
           !dist/**/*.pdb
           !dist/**/*.dbg
+          !dist/**/*.dSYM
         compression-level: 6
         retention-days: 7
-        
+
     - name: Upload Logs on Failure
       if: failure()
       uses: actions/upload-artifact@v4
