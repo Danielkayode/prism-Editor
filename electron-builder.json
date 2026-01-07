@@ -1,0 +1,129 @@
+{
+  "productName": "Prism Editor",
+  "appId": "com.prism.editor",
+  "directories": {
+    "buildResources": "resources",
+    "output": "dist"
+  },
+  "files": [
+    "out/**/*",
+    "node_modules/**/*",
+    "resources/**/*",
+    "extensions/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "resources",
+      "to": "resources",
+      "filter": ["**/*"]
+    }
+  ],
+  "asarUnpack": [
+    "**/*.node",
+    "**/node_modules/@vscode/sqlite3/**/*",
+    "**/node_modules/node-pty/**/*",
+    "**/node_modules/@parcel/watcher/**/*",
+    "**/node_modules/kerberos/**/*",
+    "**/node_modules/@vscode/ripgrep/**/*",
+    "**/node_modules/native-keymap/**/*",
+    "**/node_modules/@vscode/windows-process-tree/**/*"
+  ],
+  "fileAssociations": [
+    {
+      "ext": "txt",
+      "name": "Text File",
+      "role": "Editor"
+    },
+    {
+      "ext": "js",
+      "name": "JavaScript File",
+      "role": "Editor"
+    },
+    {
+      "ext": "ts",
+      "name": "TypeScript File",
+      "role": "Editor"
+    },
+    {
+      "ext": "json",
+      "name": "JSON File",
+      "role": "Editor"
+    }
+  ],
+  "linux": {
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      },
+      {
+        "target": "deb",
+        "arch": ["x64"]
+      }
+    ],
+    "category": "Development",
+    "icon": "resources/linux",
+    "executableName": "prism-editor",
+    "desktop": {
+      "StartupWMClass": "prism-editor"
+    }
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "resources/win/icon.ico",
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Prism Editor"
+  },
+  "portable": {
+    "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
+  },
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "category": "public.app-category.developer-tools",
+    "icon": "resources/darwin/icon.icns",
+    "darkModeSupport": true,
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "resources/entitlements.mac.plist",
+    "entitlementsInherit": "resources/entitlements.mac.plist",
+    "type": "distribution"
+  },
+  "dmg": {
+    "contents": [
+      {
+        "x": 130,
+        "y": 220
+      },
+      {
+        "x": 410,
+        "y": 220,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ],
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "publish": null
+}
