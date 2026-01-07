@@ -87,14 +87,14 @@ jobs:
         choco install python311 -y --no-progress --force
         refreshenv
 
-    - name: Setup Python 3.11 for macOS
+    - name: Setup Python for macOS
       if: matrix.platform == 'macos'
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
     # ----------------------------------------
-    # Configure Build Environment for node-gyp
+    # Configure node-gyp
     # ----------------------------------------
 
     - name: Create .npmrc for node-gyp (Windows)
@@ -105,7 +105,6 @@ jobs:
         msvs_version=2022
         python=C:\\Python311\\python.exe
         EOF
-        echo "Created .npmrc:"
         cat .npmrc
 
     - name: Create .npmrc for node-gyp (Linux)
@@ -115,7 +114,6 @@ jobs:
         cat > .npmrc << EOF
         python=python3
         EOF
-        echo "Created .npmrc:"
         cat .npmrc
 
     - name: Create .npmrc for node-gyp (macOS)
@@ -125,18 +123,25 @@ jobs:
         cat > .npmrc << EOF
         python=python3.11
         EOF
-        echo "Created .npmrc:"
         cat .npmrc
 
     # ----------------------------------------
     # Cache Setup
     # ----------------------------------------
 
+    - name: Cache node_modules
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-npm-${{ hashFiles('package.json') }}
+        restore-keys: |
+          ${{ runner.os }}-npm-
+
     - name: Cache Electron
       uses: actions/cache@v4
       with:
         path: ${{ env.ELECTRON_CACHE }}
-        key: ${{ runner.os }}-electron-cache-${{ hashFiles('**/package-lock.json') }}
+        key: ${{ runner.os }}-electron-cache-${{ hashFiles('package.json') }}
         restore-keys: |
           ${{ runner.os }}-electron-cache-
 
@@ -144,7 +149,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ env.ELECTRON_BUILDER_CACHE }}
-        key: ${{ runner.os }}-electron-builder-cache-${{ hashFiles('**/package-lock.json') }}
+        key: ${{ runner.os }}-electron-builder-cache-${{ hashFiles('package.json') }}
         restore-keys: |
           ${{ runner.os }}-electron-builder-cache-
 
@@ -159,58 +164,48 @@ jobs:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
         echo "🔧 Installing dependencies..."
-        npm ci --no-audit --no-fund
+        npm install --no-audit --no-fund
         echo "✅ Dependencies installed"
 
     # ----------------------------------------
-    # Apply Patches (if needed)
+    # Apply Patches
     # ----------------------------------------
 
     - name: Apply TypeScript Patches
       shell: bash
       run: |
         if [ -f "extensions/tunnel-forwarding/src/split.ts" ]; then
-          echo "Patching tunnel-forwarding..."
           if sed --version 2>&1 | grep -q GNU; then
             sed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
           else
             sed -i '' '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
           fi
         fi
-        echo "✅ Patches applied"
 
     # ----------------------------------------
     # Build Application
     # ----------------------------------------
 
-    - name: Compile TypeScript & Extensions
+    - name: Compile TypeScript
       shell: bash
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        echo "🔨 Running compile..."
         npm run compile
-        echo "✅ Compilation complete"
 
-    - name: Verify Compilation Output
+    - name: Check Compilation Output
       shell: bash
       run: |
-        if [ -d "out" ]; then
-          echo "✅ 'out' directory exists"
-          ls -la out/ | head -20
-        else
-          echo "❌ 'out' not found!"
+        if [ ! -d "out" ]; then
+          echo "❌ out directory missing!"
           exit 1
         fi
 
-    - name: Rebuild Native Modules (if present)
+    - name: Rebuild Native Modules
       shell: bash
       run: |
-        if grep -q "rebuild" package.json; then
-          echo "🔧 Rebuilding native modules..."
+        if grep -q rebuild package.json; then
           npm run rebuild
-        else
-          echo "ℹ️ No rebuild script defined"
         fi
 
     # ----------------------------------------
@@ -224,37 +219,32 @@ jobs:
         USE_HARD_LINKS: false
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        echo "📦 Packaging for ${{ matrix.platform }}..."
         mkdir -p dist
-
         case "${{ matrix.platform }}" in
           linux)
             npx electron-builder --linux --x64 --publish never \
-              || npx electron-builder --linux --x64 --dir
+            || npx electron-builder --linux --x64 --dir
             ;;
           windows)
             npx electron-builder --windows --x64 --publish never \
-              || npx electron-builder --windows --x64 --dir
+            || npx electron-builder --windows --x64 --dir
             ;;
           macos)
             npx electron-builder --mac --x64 --arm64 --publish never \
-              || npx electron-builder --mac --x64 --arm64 --dir
+            || npx electron-builder --mac --x64 --arm64 --dir
             ;;
         esac
 
-        echo "✅ Packaging complete"
-
-    # ----------------------------------------
-    # Artifact Listing & Upload
-    # ----------------------------------------
-
-    - name: List Build Artifacts
+    - name: List Build Output
       shell: bash
       run: |
-        echo "📦 dist directory contents:"
-        find dist -type f -print || ls -la dist/
+        find dist -type f -print
 
-    - name: Upload Build Artifacts
+    # ----------------------------------------
+    # Upload Artifacts
+    # ----------------------------------------
+
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       if: success()
       with:
@@ -263,7 +253,7 @@ jobs:
         if-no-files-found: warn
         retention-days: 7
 
-    - name: Upload Build Logs on Failure
+    - name: Upload Logs on Failure
       uses: actions/upload-artifact@v4
       if: failure()
       with:
