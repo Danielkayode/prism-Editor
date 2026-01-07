@@ -1,5 +1,5 @@
 # electron-builder.yml
-# Place this file in your project root
+# VSCode-based Electron Builder Configuration
 
 appId: com.prism.editor
 productName: Prism Editor
@@ -9,63 +9,130 @@ copyright: Copyright © 2025
 directories:
   output: dist
   buildResources: resources
+  app: .
 
-# Files to include
+# Electron version (should match package.json)
+electronVersion: 27.0.0
+
+# Files to include - VSCode structure
 files:
   - "out/**/*"
   - "extensions/**/*"
+  - "!extensions/**/src/**"
+  - "!extensions/**/out/test/**"
   - "node_modules/**/*"
   - "resources/**/*"
   - "package.json"
+  - "product.json"
   - "!**/*.ts"
   - "!**/*.map"
   - "!**/test/**"
   - "!**/*.md"
+  - "!**/tsconfig.json"
+  - "!build/**"
+  - "!scripts/**"
+  - "!src/**"
+  - "!test/**"
+  - "!.github/**"
+  - "!.vscode/**"
+  - "!*.yml"
+  - "!gulpfile.js"
+
+# Exclude unnecessary node_modules
+asarUnpack:
+  - "node_modules/native-keymap/**"
+  - "node_modules/native-watchdog/**"
+  - "node_modules/node-pty/**"
+  - "node_modules/@vscode/spdlog/**"
+  - "node_modules/@vscode/sqlite3/**"
+  - "node_modules/@parcel/watcher/**"
+  - "node_modules/kerberos/**"
 
 # Compression
 compression: normal
 asar: true
 
+# Extra resources
+extraResources:
+  - from: "node_modules/@vscode/ripgrep/bin/"
+    to: "app/node_modules/@vscode/ripgrep/bin/"
+    filter:
+      - "**/*"
+
 # Linux configuration
 linux:
   target:
-    - AppImage
-    - deb
-    - rpm
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+    - target: rpm
+      arch:
+        - x64
   category: Development
-  icon: resources/icon.icns
+  icon: resources/linux
   executableName: prism-editor
   artifactName: "${productName}-${version}-${arch}.${ext}"
+  desktop:
+    Name: Prism Editor
+    Comment: AI-powered code editor based on VSCode
+    Categories: Development;IDE;
 
 # Windows configuration  
 win:
   target:
-    - nsis
-    - portable
-  icon: resources/icon.ico
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  icon: resources/win32/code.ico
   artifactName: "${productName}-Setup-${version}.${ext}"
+  verifyUpdateCodeSignature: false
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  perMachine: false
+  allowElevation: true
+  installerIcon: resources/win32/code.ico
+  uninstallerIcon: resources/win32/code.ico
+  installerHeaderIcon: resources/win32/code.ico
   createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Prism Editor
+  include: "build/win32/installer/installer.nsh"
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: "${productName}-Portable-${version}.${ext}"
 
 # macOS configuration
 mac:
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
   category: public.app-category.developer-tools
-  icon: resources/icon.icns
+  icon: resources/darwin/code.icns
   hardenedRuntime: true
   gatekeeperAssess: false
-  entitlements: resources/entitlements.mac.plist
-  entitlementsInherit: resources/entitlements.mac.plist
+  entitlements: resources/darwin/entitlements.plist
+  entitlementsInherit: resources/darwin/entitlements.plist
   artifactName: "${productName}-${version}-${arch}.${ext}"
+  darkModeSupport: true
+  type: distribution
 
 dmg:
   sign: false
+  writeUpdateInfo: false
   contents:
     - x: 130
       y: 220
@@ -74,7 +141,31 @@ dmg:
       type: link
       path: /Applications
 
-# Publish configuration (disabled for manual releases)
-publish:
-  provider: generic
-  url: https://example.com/
+# File associations
+fileAssociations:
+  - ext: 
+      - js
+      - ts
+      - jsx
+      - tsx
+      - json
+      - html
+      - css
+      - md
+      - py
+      - java
+      - cpp
+      - c
+      - go
+      - rs
+    name: Source Code
+    role: Editor
+
+# Protocol associations
+protocols:
+  - name: prism
+    schemes:
+      - prism
+
+# Publish configuration (disabled)
+publish: null
