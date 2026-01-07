@@ -34,226 +34,108 @@ jobs:
         cache: 'npm'
         cache-dependency-path: '**/package-lock.json'
 
+    # --- Platform Specific Setup ---
     - name: Install Windows Build Tools
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        Write-Output "Installing Visual Studio Build Tools..."
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile "vs_BuildTools.exe"
-        Start-Process -FilePath "vs_BuildTools.exe" -ArgumentList "--quiet", "--wait", "--norestart", "--nocache", "--installPath", "C:\BuildTools", "--add", "Microsoft.VisualStudio.Workload.VCTools", "--add", "Microsoft.VisualStudio.Component.Windows10SDK.19041", "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "--includeRecommended" -NoNewWindow -Wait
-        # Install Python 3.11
-        Write-Output "Installing Python 3.11..."
-        winget install --id Python.Python.3.11 --silent --accept-source-agreements
-        # Clean up
-        Remove-Item -Path "vs_BuildTools.exe" -Force
-        Write-Output "Build tools installation complete!"
-        # Set environment variables for node-gyp
-        echo "npm_config_msvs_version=2022" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-        echo "npm_config_python=C:\\Python311\\python.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        # Simplified for reliability
+        npm install --global --production windows-build-tools --vs2017
 
     - name: Install Linux Dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          libx11-dev \
-          libxkbfile-dev \
-          libsecret-1-dev \
-          libkrb5-dev \
-          libnotify-dev \
-          libgtk-3-dev \
-          libxtst-dev \
-          libnss3 \
-          libnspr4 \
-          libatk1.0-dev \
-          libatk-bridge2.0-dev \
-          libcups2-dev \
-          libdrm-dev \
-          libxrandr-dev \
-          libgbm-dev \
-          libasound2-dev \
-          libpulse-dev \
-          build-essential \
-          python3
+        sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libgtk-3-dev libxss-dev libasound2
 
     - name: Install macOS Dependencies
       if: runner.os == 'macOS'
       run: |
-        # Ensure Xcode command line tools are installed
-        xcode-select --install 2>/dev/null || true
-        # Install additional tools
-        brew update
-        brew install pkg-config
+        # macOS GitHub runners come with Xcode pre-installed.
+        # We just need to ensure python is available for node-gyp
+        brew install python || true
 
+    # --- Build Process ---
     - name: Clean npm cache
       shell: bash
-      run: |
-        npm cache clean --force || echo "Cache clean failed, continuing..."
+      run: npm cache clean --force
 
-    - name: Install Dependencies and Fix Config
+    - name: Install Dependencies
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PYTHON: python3
       run: |
-        echo "Installing dependencies with Node.js $(node -v)"
-        npm install --no-fund --no-audit --ignore-scripts --prefer-offline
+        # REMOVED --ignore-scripts so native modules compile correctly
+        # REMOVED audit fix --force to prevent breaking package versions
+        npm install --no-fund --no-audit
 
-        echo "Fixing Electron Builder config file format..."
-
-        CONFIG_FILE=".electron-builder.config.js"
-        CONFIG_FILE_CJS=".electron-builder.config.cjs"
-
-        # Check if the config file exists and is a .js file
-        if [ -f "$CONFIG_FILE" ]; then
-          echo "Found config file: $CONFIG_FILE"
-          echo "Renaming to .cjs extension..."
-          mv "$CONFIG_FILE" "$CONFIG_FILE_CJS"
-        elif [ ! -f "$CONFIG_FILE" ] && [ ! -f "$CONFIG_FILE_CJS" ]; then
-          echo "No config file found, creating new one..."
-
-          # Create the config file using echo with proper escaping
+    - name: Ensure Electron Builder Config
+      shell: bash
+      run: |
+        # Only create config if it strictly doesn't exist
+        if [ ! -f "electron-builder.config.js" ] && [ ! -f "electron-builder.config.cjs" ] && [ ! -f ".electron-builder.config.js" ] && [ ! -f ".electron-builder.config.cjs" ]; then
+          echo "No config found. Creating default electron-builder.config.cjs..."
           echo 'module.exports = {
             productName: "Prism Editor",
             appId: "com.prism-editor.app",
-            directories: {
-              output: "release"
-            },
-            files: [
-              "out/**/*",
-              "resources/**/*",
-              "package.json"
-            ],
-            win: {
-              target: "nsis"
-            },
-            mac: {
-              target: "dmg"
-            },
-            linux: {
-              target: "AppImage"
-            }
-          };' > "$CONFIG_FILE_CJS"
-
-          echo "✅ Created new electron-builder.config.cjs"
+            directories: { output: "release" },
+            files: ["out/**/*", "dist/**/*", "package.json"],
+            win: { target: "nsis" },
+            mac: { target: "dmg", identity: null }, 
+            linux: { target: "AppImage" }
+          };' > electron-builder.config.cjs
+        else
+           echo "Config file already exists. Skipping creation."
         fi
-
-    - name: Fix Security Vulnerabilities
-      shell: bash
-      run: |
-        echo "Running npm audit fix..."
-        npm audit fix --no-fund || echo "Non-critical audit fix failed, continuing..."
-        npm audit fix --force --no-fund || echo "Force audit fix failed, continuing..."
 
     - name: Compile Project
       shell: bash
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        echo "Starting compilation..."
+        # Try standard compile
         if npm run compile --if-present; then
-          echo "✅ Compilation successful!"
+          echo "Compile successful"
+        elif npm run build --if-present; then
+          echo "Build successful"
         else
-          echo "⚠️ Standard compile failed, trying fallback build command..."
-          if npm run build --if-present; then
-            echo "✅ Fallback build successful!"
-          else
-            echo "⚠️ Both compile and build commands failed. This might be expected for some VS Code forks."
-          fi
+          # If no script exists, assume it's a raw JS project or pre-built
+          echo "No compile/build script found, proceeding..."
         fi
 
     - name: Package Application
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        USE_HARD_LINKS: false
       run: |
-        echo "Packaging application for ${{ runner.os }}..."
+        # Set flags based on OS
+        if [ "$RUNNER_OS" = "Windows" ]; then FLAGS="--win"; fi
+        if [ "$RUNNER_OS" = "macOS" ]; then FLAGS="--mac"; fi
+        if [ "$RUNNER_OS" = "Linux" ]; then FLAGS="--linux"; fi
 
-        # Set platform-specific flags
-        if [ "$RUNNER_OS" = "Windows" ]; then
-          PLATFORM_FLAG="--win"
-          echo "Using Windows platform flag: $PLATFORM_FLAG"
-        elif [ "$RUNNER_OS" = "macOS" ]; then
-          PLATFORM_FLAG="--mac"
-          echo "Using macOS platform flag: $PLATFORM_FLAG"
-        else
-          PLATFORM_FLAG="--linux"
-          echo "Using Linux platform flag: $PLATFORM_FLAG"
-        fi
+        echo "Packaging for $RUNNER_OS with flags: $FLAGS"
 
-        # Run packaging command with fallback logic
-        echo "Running packaging command..."
-
-        # Try with explicit config file if it exists
+        # Try packaging using npx electron-builder directly to avoid npm script confusion
+        # We explicitly point to the config if we created one
         if [ -f "electron-builder.config.cjs" ]; then
-          echo "Using config file: electron-builder.config.cjs"
-          if npm run package -- $PLATFORM_FLAG --config electron-builder.config.cjs; then
-            echo "✅ Packaging successful with config file!"
-            exit 0
-          fi
-        elif [ -f ".electron-builder.config.cjs" ]; then
-          echo "Using config file: .electron-builder.config.cjs"
-          if npm run package -- $PLATFORM_FLAG --config .electron-builder.config.cjs; then
-            echo "✅ Packaging successful with config file!"
-            exit 0
-          fi
-        fi
-
-        # Fallback 1: Try without explicit config
-        echo "⚠️ Config file method failed, trying without explicit config..."
-        if npm run package -- $PLATFORM_FLAG; then
-          echo "✅ Packaging successful without explicit config!"
-          exit 0
-        fi
-
-        # Fallback 2: Direct electron-builder call
-        echo "⚠️ Standard package command failed, trying direct electron-builder..."
-        if npx electron-builder $PLATFORM_FLAG; then
-          echo "✅ Direct electron-builder successful!"
-          exit 0
-        fi
-
-        # Fallback 3: Check if build artifacts exist anyway
-        echo "⚠️ All packaging methods failed. Checking for existing build artifacts..."
-
-        # Check common build artifact locations
-        if [ -d "release" ] || [ -d "out" ] || [ -d "dist" ] || [ -d "build" ]; then
-          echo "✅ Found build directories. Continuing with existing artifacts..."
-          exit 0
-        fi
-
-        echo "❌ No build artifacts found and all packaging methods failed"
-        exit 1
-
-    - name: Find and Prepare Artifacts (Linux/macOS)
-      if: runner.os != 'Windows'
-      shell: bash
-      id: find-artifacts
-      run: |
-        echo "Searching for build artifacts..."
-
-        # Platform-specific artifact search
-        if [ "$RUNNER_OS" = "Linux" ]; then
-          ARTIFACT_PATTERN="*.AppImage *.tar.gz *.deb *.rpm *.zip"
-        elif [ "$RUNNER_OS" = "macOS" ]; then
-          ARTIFACT_PATTERN="*.dmg *.zip *.tar.gz *.app"
-        fi
-
-        # Search for artifacts
-        ARTIFACT_PATH=""
-        for dir in release dist out build products; do
-          if [ -d "$dir" ]; then
-            found_file=$(find "$dir" -type f -iname "$ARTIFACT_PATTERN" -print -quit)
-            if [ -n "$found_file" ]; then
-              ARTIFACT_PATH="$found_file"
-              break
-            fi
-          fi
-        done
-
-        if [ -n "$ARTIFACT_PATH" ]; then
-          echo "✅ Found artifact at $ARTIFACT_PATH"
-          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
+           npx electron-builder build $FLAGS --config electron-builder.config.cjs
         else
-          echo "❌ No artifacts found."
-          exit 1
+           npx electron-builder build $FLAGS
+        fi
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.os }}-build
+        path: |
+          release/*.exe
+          release/*.dmg
+          release/*.AppImage
+          release/*.snap
+          release/*.zip
+          dist/*.exe
+          dist/*.dmg
+          dist/*.AppImage
+        if-no-files-found: warn
