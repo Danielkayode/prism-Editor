@@ -64,7 +64,7 @@ jobs:
           libgbm-dev \
           libxtst-dev \
           libnss3 \
-          libasound2 \
+          libasound2t64 \
           libatk-bridge2.0-0 \
           libdrm2 \
           libxcomposite1 \
@@ -93,42 +93,45 @@ jobs:
         brew install python@3.11 || true
 
     # ============================================
-    # Configure npm for node-gyp BEFORE install
+    # Configure Build Environment for node-gyp
     # ============================================
     
-    - name: Configure npm for node-gyp (Windows)
+    - name: Create .npmrc for node-gyp (Windows)
       if: matrix.platform == 'windows'
       shell: bash
       run: |
-        # Set npm config (NOT environment variables or flags)
-        npm config set msvs_version 2022
-        npm config set python python
+        # Create .npmrc file with node-gyp configuration
+        cat > .npmrc << EOF
+        msvs_version=2022
+        python=python
+        EOF
         
-        # Verify configuration
-        echo "npm config list:"
-        npm config list
+        echo "Created .npmrc with contents:"
+        cat .npmrc
 
-    - name: Configure npm for node-gyp (Linux)
+    - name: Create .npmrc for node-gyp (Linux)
       if: matrix.platform == 'linux'
       shell: bash
       run: |
-        # Set npm config (NOT environment variables or flags)
-        npm config set python python3
+        # Create .npmrc file with node-gyp configuration
+        cat > .npmrc << EOF
+        python=python3
+        EOF
         
-        # Verify configuration
-        echo "npm config list:"
-        npm config list
+        echo "Created .npmrc with contents:"
+        cat .npmrc
 
-    - name: Configure npm for node-gyp (macOS)
+    - name: Create .npmrc for node-gyp (macOS)
       if: matrix.platform == 'macos'
       shell: bash
       run: |
-        # Set npm config (NOT environment variables or flags)
-        npm config set python python3
+        # Create .npmrc file with node-gyp configuration
+        cat > .npmrc << EOF
+        python=python3
+        EOF
         
-        # Verify configuration
-        echo "npm config list:"
-        npm config list
+        echo "Created .npmrc with contents:"
+        cat .npmrc
 
     # ============================================
     # Cache Setup
@@ -162,8 +165,7 @@ jobs:
       run: |
         echo "🔧 Installing dependencies..."
         
-        # DO NOT use --legacy-peer-deps or any custom flags that might conflict
-        # The npm config is already set above
+        # Install without any problematic flags
         npm install --no-audit --no-fund
         
         echo "✅ Dependencies installed successfully"
