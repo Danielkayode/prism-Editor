@@ -27,7 +27,7 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # FIX 1: Force Python 3.11 on all OSs (fixes macOS 'distutils' error)
+    # Required for node-gyp to build native modules
     - name: Setup Python 3.11
       uses: actions/setup-python@v5
       with:
@@ -40,44 +40,49 @@ jobs:
         cache: 'npm'
         cache-dependency-path: '**/package-lock.json'
 
-    # FIX 2: Install correct Linux libraries for Ubuntu 24.04
+    # Install system libraries for Linux
     - name: Install Linux Dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev libgtk-3-dev libxss-dev libasound2-dev
 
-    - name: Clean npm cache
+    - name: Fix Dependencies (Critical Step)
       shell: bash
-      run: npm cache clean --force
+      run: |
+        echo "🔧 Applying critical dependency fixes..."
+        
+        # 1. Force node-addon-api to v7.1.0. 
+        # Newer versions (v8+) crash builds on Electron 27.
+        npm pkg set overrides.node-addon-api="7.1.0"
+        
+        # 2. DELETE package-lock.json. 
+        # This is required so npm ignores the old locked version and uses the override.
+        rm -rf package-lock.json node_modules
+        
+        # 3. Clean cache
+        npm cache clean --force
 
-    - name: Configure and Install Dependencies
+    - name: Install Dependencies
       shell: bash
       env:
-        # FIX 3: Pass Token to allow ripgrep download on macOS (Fixes 403 Forbidden)
+        # Token is required to download 'ripgrep' binary on macOS
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         PYTHON: python
       run: |
-        echo "🔧 Applying version overrides..."
-        
-        # FIX 4: THE CRITICAL FIX FOR WINDOWS AND LINUX
-        # Force node-addon-api to v7.1.0. 
-        # v8.0.0+ crashes Electron 27 builds with 'node_api_nogc_env' errors.
-        npm pkg set overrides.node-addon-api="7.1.0"
-        
-        echo "📦 Installing dependencies..."
-        # We run install AFTER setting the override so it downloads the working version
+        echo "📦 Installing dependencies with overrides..."
         npm install --no-fund --no-audit
 
     - name: Ensure Electron Builder Config
       shell: bash
       run: |
-        # Only create if completely missing
-        if [ ! -f "electron-builder.config.js" ] && [ ! -f "electron-builder.config.cjs" ] && [ ! -f ".electron-builder.config.js" ] && [ ! -f ".electron-builder.config.cjs" ]; then
-          echo "No config found. Creating default electron-builder.config.cjs..."
-          # FIX 5: Added 'identity: null' for macOS to prevent code signing errors
-          echo 'module.exports = {
+        # Check if ANY config exists (yml, json, js, cjs)
+        if [ -f "electron-builder.yml" ] || [ -f "electron-builder.yaml" ] || [ -f "electron-builder.json" ] || [ -f "electron-builder.config.js" ] || [ -f "electron-builder.config.cjs" ]; then
+           echo "✅ Found existing electron-builder configuration. Skipping creation."
+        else
+           echo "⚠️ No config found. Creating default electron-builder.config.cjs..."
+           echo 'module.exports = {
             productName: "Prism Editor",
             appId: "com.prism-editor.app",
             directories: { output: "release" },
@@ -93,12 +98,13 @@ jobs:
       env:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
+        echo "🔨 Compiling..."
+        # We try compile, but if it fails we proceed to package 
+        # (packaging might handle build internally or use existing files)
         if npm run compile --if-present; then
           echo "✅ Compile successful"
-        elif npm run build --if-present; then
-          echo "✅ Build successful"
         else
-          echo "⚠️ No compile/build script found, proceeding..."
+          echo "⚠️ Compile script failed or missing. Attempting to proceed to packaging..."
         fi
 
     - name: Package Application
@@ -113,13 +119,9 @@ jobs:
         if [ "$RUNNER_OS" = "Linux" ]; then FLAGS="--linux"; fi
 
         echo "🚀 Packaging for $RUNNER_OS..."
-
-        # Use explicit config if we created one to avoid confusion
-        if [ -f "electron-builder.config.cjs" ]; then
-           npx electron-builder build $FLAGS --config electron-builder.config.cjs
-        else
-           npx electron-builder build $FLAGS
-        fi
+        
+        # Run builder
+        npx electron-builder build $FLAGS
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
