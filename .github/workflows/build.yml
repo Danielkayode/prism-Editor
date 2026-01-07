@@ -2,264 +2,189 @@ name: Build Prism Editor
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch: {}
+    branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - debug
 
-env:
-  NODE_VERSION: '20'
-  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
-      packages: write
-
+      contents: read
+      actions: write
+    
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             platform: linux
+            image: node:20-bullseye
           - os: windows-latest
             platform: windows
           - os: macos-latest
             platform: macos
 
     steps:
+    # ========================================
+    # Setup Environment
+    # ========================================
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
         submodules: recursive
         fetch-depth: 0
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-
-    # ----------------------------------------
-    # Platform-Specific Dependencies
-    # ----------------------------------------
-
-    - name: Install Linux Dependencies
+    # Container setup for Linux (includes Node.js + Python)
+    - name: Setup Linux Environment
       if: matrix.platform == 'linux'
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          python3 \
-          python3-pip \
-          python3-setuptools \
-          libx11-dev \
-          libxkbfile-dev \
-          libsecret-1-dev \
-          libkrb5-dev \
-          libnotify-dev \
-          libgtk-3-dev \
-          libgbm-dev \
-          libxtst-dev \
-          libnss3 \
-          libasound2 \
-          libatk-bridge2.0-0 \
-          libdrm2 \
-          libxcomposite1 \
-          libxdamage1 \
-          libxrandr2 \
-          libpango-1.0-0 \
-          libcairo2 \
-          libcups2 \
-          libxss1 \
-          libxcursor1 \
-          fakeroot \
-          rpm \
-          dpkg
-
-    - name: Configure Windows Environment
+        echo "NODE_BIN=/usr/local/bin" >> $GITHUB_ENV
+        
+    - name: Setup Node.js (Windows)
       if: matrix.platform == 'windows'
-      shell: powershell
+      shell: pwsh
       run: |
-        choco install python311 -y --no-progress --force
-        refreshenv
-
-    - name: Setup Python for macOS
+        # Install Node.js 20 using direct download
+        $nodeUrl = "https://nodejs.org/dist/v${env:NODE_VERSION}/node-v${env:NODE_VERSION}-win-x64.zip"
+        Invoke-WebRequest -Uri $nodeUrl -OutFile node.zip
+        Expand-Archive node.zip -DestinationPath C:\node
+        echo "C:\node\node-v${env:NODE_VERSION}-win-x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+    - name: Setup Node.js (macOS)
       if: matrix.platform == 'macos'
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    # ----------------------------------------
-    # Configure node-gyp
-    # ----------------------------------------
-
-    - name: Create .npmrc for node-gyp (Windows)
-      if: matrix.platform == 'windows'
-      shell: bash
       run: |
-        cat > .npmrc << EOF
-        msvs_version=2022
-        python=C:\\Python311\\python.exe
-        EOF
-        cat .npmrc
+        # Install Node.js 20 using direct download
+        curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz" | tar -xz
+        echo "$GITHUB_WORKSPACE/node-v${NODE_VERSION}-darwin-arm64/bin" >> $GITHUB_PATH
 
-    - name: Create .npmrc for node-gyp (Linux)
-      if: matrix.platform == 'linux'
-      shell: bash
+    - name: Verify Node.js Installation
       run: |
-        cat > .npmrc << EOF
-        python=python3
-        EOF
-        cat .npmrc
+        node --version
+        npm --version
 
-    - name: Create .npmrc for node-gyp (macOS)
-      if: matrix.platform == 'macos'
-      shell: bash
-      run: |
-        cat > .npmrc << EOF
-        python=python3.11
-        EOF
-        cat .npmrc
-
-    # ----------------------------------------
-    # Cache Setup
-    # ----------------------------------------
-
-    - name: Cache node_modules
-      uses: actions/cache@v4
-      with:
-        path: node_modules
-        key: ${{ runner.os }}-npm-${{ hashFiles('package.json') }}
-        restore-keys: |
-          ${{ runner.os }}-npm-
-
-    - name: Cache Electron
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.ELECTRON_CACHE }}
-        key: ${{ runner.os }}-electron-cache-${{ hashFiles('package.json') }}
-        restore-keys: |
-          ${{ runner.os }}-electron-cache-
-
-    - name: Cache Electron Builder
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.ELECTRON_BUILDER_CACHE }}
-        key: ${{ runner.os }}-electron-builder-cache-${{ hashFiles('package.json') }}
-        restore-keys: |
-          ${{ runner.os }}-electron-builder-cache-
-
-    # ----------------------------------------
+    # ========================================
     # Install Dependencies
-    # ----------------------------------------
+    # ========================================
+    - name: Install Dependencies (Linux)
+      if: matrix.platform == 'linux'
+      run: |
+        apt-get update && apt-get install -y \
+          build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev \
+          libkrb5-dev libnotify-dev libgtk-3-dev libgbm-dev libxtst-dev \
+          libnss3 libasound2 libatk-bridge2.0-0 libdrm2 libxcomposite1 \
+          libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 libcups2 \
+          libxss1 libxcursor1 fakeroot rpm dpkg
 
-    - name: Install Dependencies
+    - name: Install Dependencies (Windows)
+      if: matrix.platform == 'windows'
+      shell: pwsh
+      run: |
+        choco install python311 -y --no-progress
+        echo "C:\Python311" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    # ========================================
+    # Configure Build
+    # ========================================
+    - name: Configure node-gyp
       shell: bash
+      run: |
+        npm config set python python3 --global
+        npm config set msvs_version 2022 --global
+        
+    - name: Install Node Dependencies
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
-        echo "🔧 Installing dependencies..."
-        npm install --no-audit --no-fund
-        echo "✅ Dependencies installed"
-
-    # ----------------------------------------
-    # Apply Patches
-    # ----------------------------------------
-
-    - name: Apply TypeScript Patches
-      shell: bash
-      run: |
-        if [ -f "extensions/tunnel-forwarding/src/split.ts" ]; then
-          if sed --version 2>&1 | grep -q GNU; then
-            sed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
-          else
-            sed -i '' '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
-          fi
-        fi
-
-    # ----------------------------------------
+        # Use npm install since no lock file exists
+        npm install --no-audit --no-fund --no-package-lock
+        
+    # ========================================
     # Build Application
-    # ----------------------------------------
-
+    # ========================================
     - name: Compile TypeScript
-      shell: bash
       env:
         NODE_OPTIONS: --max-old-space-size=8192
-      run: |
-        npm run compile
-
-    - name: Check Compilation Output
-      shell: bash
+      run: npm run compile
+        
+    - name: Verify Build Output
       run: |
         if [ ! -d "out" ]; then
-          echo "❌ out directory missing!"
+          echo "Build failed: out directory not found"
           exit 1
         fi
-
+        echo "Build successful: $(ls -la out/ | wc -l) files generated"
+        
     - name: Rebuild Native Modules
-      shell: bash
       run: |
-        if grep -q rebuild package.json; then
+        if npm run | grep -q rebuild; then
           npm run rebuild
         fi
-
-    # ----------------------------------------
+        
+    # ========================================
     # Package Application
-    # ----------------------------------------
-
-    - name: Package with Electron Builder
-      shell: bash
+    # ========================================
+    - name: Package Electron Application
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        USE_HARD_LINKS: false
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
         mkdir -p dist
+        
         case "${{ matrix.platform }}" in
           linux)
-            npx electron-builder --linux --x64 --publish never \
-            || npx electron-builder --linux --x64 --dir
+            npx electron-builder --linux --x64 --publish never
             ;;
           windows)
-            npx electron-builder --windows --x64 --publish never \
-            || npx electron-builder --windows --x64 --dir
+            npx electron-builder --windows --x64 --publish never
             ;;
           macos)
-            npx electron-builder --mac --x64 --arm64 --publish never \
-            || npx electron-builder --mac --x64 --arm64 --dir
+            npx electron-builder --mac --x64 --arm64 --publish never
             ;;
         esac
-
-    - name: List Build Output
-      shell: bash
-      run: |
-        find dist -type f -print
-
-    # ----------------------------------------
-    # Upload Artifacts
-    # ----------------------------------------
-
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+        
+    # ========================================
+    # Upload Results
+    # ========================================
+    - name: Upload Build Artifacts
       if: success()
-      with:
-        name: prism-editor-${{ matrix.platform }}-${{ github.run_number }}
-        path: dist/**
-        if-no-files-found: warn
-        retention-days: 7
-
-    - name: Upload Logs on Failure
       uses: actions/upload-artifact@v4
-      if: failure()
       with:
-        name: build-logs-${{ matrix.platform }}-${{ github.run_number }}
+        name: prism-editor-${{ matrix.platform }}-${{ github.sha }}
+        path: |
+          dist/
+          !dist/**/*.pdb
+          !dist/**/*.dbg
+        compression-level: 6
+        retention-days: 7
+        
+    - name: Upload Logs on Failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ matrix.platform }}-${{ github.sha }}
         path: |
           npm-debug.log*
           *.log
-        if-no-files-found: ignore
-        retention-days: 90
+          out/*.log
+        retention-days: 14
