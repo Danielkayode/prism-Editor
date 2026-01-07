@@ -36,8 +36,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
-        # REMOVED 'cache: yarn' because you don't have a yarn.lock file yet.
-        # We will let the install step generate it.
+        # No cache defined here because yarn.lock doesn't exist yet
 
     - name: Install Linux Dependencies
       if: runner.os == 'Linux'
@@ -52,7 +51,7 @@ jobs:
         npm install -g yarn
 
         echo "🔧 Injecting 'resolutions' to force node-addon-api v7.1.0..."
-        # This fixes the 'node_api_nogc_env' C++ crash on Windows/Linux
+        # This prevents the 'node_api_nogc_env' crash on Windows/Linux
         node -e "
           const fs = require('fs');
           if (fs.existsSync('package.json')) {
@@ -74,8 +73,8 @@ jobs:
         CHILD_CONCURRENCY: 1
       run: |
         echo "📦 Installing with Yarn..."
-        # This will GENERATE the missing yarn.lock file, which the build script needs
-        yarn install --frozen-lockfile=false --network-timeout 100000
+        # FIX: Removed invalid flag. This will now install deps and create yarn.lock
+        yarn install --network-timeout 100000
 
     - name: Compile Project
       shell: bash
@@ -83,6 +82,7 @@ jobs:
         NODE_OPTIONS: --max-old-space-size=8192
       run: |
         echo "🔨 Compiling..."
+        # This relies on the yarn.lock generated in the previous step
         yarn run compile
 
     - name: Verify Build
@@ -106,6 +106,7 @@ jobs:
 
         echo "🚀 Packaging for $RUNNER_OS..."
         
+        # Use existing config if available, otherwise default
         if [ -f "electron-builder.config.cjs" ]; then
            npx electron-builder build $FLAGS --config electron-builder.config.cjs
         else
