@@ -39,9 +39,10 @@ if [[ -n "${PRISM_COMMIT}" ]]; then
   git fetch --depth 1 origin "${PRISM_COMMIT}"
   git checkout "${PRISM_COMMIT}"
 else
-  # Try to fetch the default branch (main), if it fails, try 'master'
+  # Try to fetch the default branch (main). 
+  # We use '||' to prevent 'set -e' from killing the script if the first fetch fails.
   echo "Attempting to fetch branch: ${PRISM_BRANCH}"
-  if git fetch --depth 1 origin "${PRISM_BRANCH}"; then
+  if git fetch --depth 1 origin "${PRISM_BRANCH}" 2>/dev/null; then
     echo "Successfully fetched ${PRISM_BRANCH}"
   else
     echo "Branch '${PRISM_BRANCH}' not found. Trying 'master'..."
