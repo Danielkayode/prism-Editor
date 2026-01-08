@@ -12,10 +12,10 @@ on:
       checkout_pr:
         type: string
         description: Checkout PR
-      void_commit: # Void added this
+      prism_commit:
         type: string
-        description: Checkout specific Void commit
-      void_release: # Void added this
+        description: Checkout specific Prism commit
+      prism_release:
         type: string
         description: Custom release number
   repository_dispatch:
@@ -31,9 +31,9 @@ on:
     - '**/*.md'
 
 env:
-  APP_NAME: Void
+  APP_NAME: Prism
   ASSETS_REPOSITORY: ${{ github.repository_owner }}/binaries
-  BINARY_NAME: void
+  BINARY_NAME: prism
   GH_REPO_PATH: ${{ github.repository_owner }}/binaries
   ORG_NAME: ${{ github.repository_owner }}
   OS_NAME: windows
@@ -52,8 +52,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.GITHUB_BRANCH }}
+
+      - name: Make scripts executable
+        run: chmod +x *.sh
 
       - name: Switch to relevant branch
         env:
@@ -61,9 +62,9 @@ jobs:
         run: ./get_pr.sh
 
       - name: Clone VSCode repo
-        env: # Void added this
-          VOID_COMMIT: ${{ github.event.inputs.void_commit }} # Void added this
-          VOID_RELEASE: ${{ github.event.inputs.void_release }} # Void added this
+        env:
+          PRISM_COMMIT: ${{ github.event.inputs.prism_commit }}
+          PRISM_RELEASE: ${{ github.event.inputs.prism_release }}
         run: ./get_repo.sh
 
       - name: Check PR or cron
@@ -71,7 +72,7 @@ jobs:
           GENERATE_ASSETS: ${{ github.event.inputs.generate_assets }}
         run: ./check_cron_or_pr.sh
 
-      - name: Check existing VSCodium tags/releases
+      - name: Check existing tags/releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHECK_ALL: 'yes'
@@ -92,8 +93,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.GITHUB_BRANCH }}
+        if: env.SHOULD_BUILD == 'yes'
+
+      - name: Make scripts executable
+        run: chmod +x *.sh
         if: env.SHOULD_BUILD == 'yes'
 
       - name: Switch to relevant branch
@@ -124,9 +127,9 @@ jobs:
         if: env.SHOULD_BUILD == 'yes'
 
       - name: Clone VSCode repo
-        env: # Void added this
-          VOID_COMMIT: ${{ github.event.inputs.void_commit }} # Void added this
-          VOID_RELEASE: ${{ github.event.inputs.void_release }} # Void added this
+        env:
+          PRISM_COMMIT: ${{ github.event.inputs.prism_commit }}
+          PRISM_RELEASE: ${{ github.event.inputs.prism_release }}
         run: ./get_repo.sh
         if: env.SHOULD_BUILD == 'yes'
 
@@ -181,8 +184,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.GITHUB_BRANCH }}
+        if: env.SHOULD_BUILD == 'yes'
+
+      - name: Make scripts executable
+        run: chmod +x *.sh
         if: env.SHOULD_BUILD == 'yes'
 
       - name: Switch to relevant branch
@@ -203,7 +208,7 @@ jobs:
           python-version: '3.11'
         if: env.SHOULD_BUILD == 'yes'
 
-      - name: Check existing VSCodium tags/releases
+      - name: Check existing tags/releases
         env:
           DISABLE_MSI: ${{ vars.DISABLE_STABLE_MSI }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -228,40 +233,13 @@ jobs:
         run: ./prepare_assets.sh
         if: env.SHOULD_BUILD == 'yes' && (env.SHOULD_DEPLOY == 'yes' || github.event.inputs.generate_assets == 'true')
 
-      # Void commented this - we should re-add it eventually
-      # - name: Upload unsigned artifacts
-      #   id: upload-unsigned-artifacts
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: unsigned-${{ matrix.vscode_arch }}
-      #     path: |
-      #       assets/*.exe
-      #       assets/*.msi
-      #     retention-days: 1
-      #   if: env.SHOULD_BUILD == 'yes' && (env.SHOULD_DEPLOY == 'yes' || github.event.inputs.generate_assets == 'true')
-
-      # - name: Signing
-      #   uses: signpath/github-action-submit-signing-request@v1
-      #   with:
-      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-      #     organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-      #     project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-      #     signing-policy-slug: ${{ secrets.SIGNPATH_POLICY_SLUG }}
-      #     github-artifact-id: ${{ steps.upload-unsigned-artifacts.outputs.artifact-id }}
-      #     artifact-configuration-slug: ${{ matrix.vscode_arch }}
-      #     wait-for-completion: true
-      #     # 3h to manually approve the request
-      #     wait-for-completion-timeout-in-seconds: 10800
-      #     output-artifact-directory: assets/
-      #   if: env.SHOULD_BUILD == 'yes' && (env.SHOULD_DEPLOY == 'yes' || github.event.inputs.generate_assets == 'true')
-
       - name: Prepare checksums
         run: ./prepare_checksums.sh
         if: env.SHOULD_BUILD == 'yes' && (env.SHOULD_DEPLOY == 'yes' || github.event.inputs.generate_assets == 'true')
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.STRONGER_GITHUB_TOKEN }} # Void bumped this to stronger
+          GITHUB_TOKEN: ${{ secrets.STRONGER_GITHUB_TOKEN }}
         run: ./release.sh
         if: env.SHOULD_BUILD == 'yes' && env.SHOULD_DEPLOY == 'yes'
 
@@ -280,34 +258,3 @@ jobs:
           path: assets/
           retention-days: 3
         if: env.SHOULD_BUILD == 'yes' && env.SHOULD_DEPLOY == 'no' && github.event.inputs.generate_assets == 'true'
-
-  # Void commented this - we should re-add it eventually
-  # winget:
-  #   needs: build
-  #   runs-on: windows-latest
-  #   defaults:
-  #     run:
-  #       shell: bash
-  #   env:
-  #     APP_IDENTIFIER: VSCodium.VSCodium
-  #   if: needs.build.outputs.SHOULD_DEPLOY == 'yes'
-
-    # steps:
-    #   - uses: actions/checkout@v4
-    #     with:
-    #       ref: ${{ env.GITHUB_BRANCH }}
-
-      # - name: Check version
-      #   run: ./stores/winget/check_version.sh
-      #   env:
-      #     RELEASE_VERSION: ${{ needs.build.outputs.RELEASE_VERSION }}
-
-      # - name: Release to WinGet
-      #   uses: vedantmgoyal9/winget-releaser@main
-      #   with:
-      #     identifier: ${{ env.APP_IDENTIFIER }}
-      #     version: ${{ env.RELEASE_VERSION }}
-      #     release-tag: ${{ env.RELEASE_VERSION }}
-      #     installers-regex: '\.exe$' # only .exe files
-      #     token: ${{ secrets.STRONGER_GITHUB_TOKEN }}
-      #   if: env.SHOULD_DEPLOY == 'yes'
