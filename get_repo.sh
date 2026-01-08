@@ -15,7 +15,7 @@ echo "GITHUB_ENV=${GITHUB_ENV}"
 
 echo "SHOULD_DEPLOY=${SHOULD_DEPLOY}"
 echo "SHOULD_BUILD=${SHOULD_BUILD}"
--------------------------
+echo "-------------------------"
 
 # git workaround
 if [[ "${CI_BUILD}" != "no" ]]; then
@@ -40,7 +40,7 @@ if [[ -n "${PRISM_COMMIT}" ]]; then
   git checkout "${PRISM_COMMIT}"
 else
   # Try to fetch the default branch (main). 
-  # We use 'if git fetch' which is safe under 'set -e' because the failure is handled by the 'if'.
+  # We use 'if git fetch' which is safe under 'set -e' because the failure is handled by the 'if' condition.
   echo "Attempting to fetch branch: ${PRISM_BRANCH}"
   if git fetch --depth 1 origin "${PRISM_BRANCH}" 2>/dev/null; then
     echo "Successfully fetched ${PRISM_BRANCH}"
@@ -52,7 +52,14 @@ else
         # Final fallback: fetch whatever the remote head is to detect the branch name
         git fetch --depth 1 origin
         # Detect the remote branch name (works for 'main', 'master', or custom names)
+        # We use ls-remote as a cleaner way to find the default branch without complex parsing
         PRISM_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
+        
+        if [[ -z "${PRISM_BRANCH}" ]]; then
+           # If remote show fails, try ls-remote as a last resort
+           PRISM_BRANCH=$(git ls-remote --symref origin HEAD | awk '/^ref:/ {sub(/refs\/heads\//, "", $2); print $2}')
+        fi
+        
         echo "Detected default branch as: ${PRISM_BRANCH}"
         git fetch --depth 1 origin "${PRISM_BRANCH}"
     fi
