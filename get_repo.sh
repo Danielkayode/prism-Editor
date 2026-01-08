@@ -22,42 +22,62 @@ if [[ "${CI_BUILD}" != "no" ]]; then
   git config --global --add safe.directory "/__w/$( echo "${GITHUB_REPOSITORY}" | awk '{print tolower($0)}' )"
 fi
 
-VOID_BRANCH="main"
-echo "Cloning void ${VOID_BRANCH}..."
+# Allow PRISM_BRANCH to be overridden, default to main
+PRISM_BRANCH="${PRISM_BRANCH:-main}"
+echo "Cloning Prism..."
 
 mkdir -p vscode
 cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
 git init -q
-git remote add origin https://github.com/voideditor/void.git
+git remote add origin https://github.com/Danielkayode/prism-Editor.git
 
 # Allow callers to specify a particular commit to checkout via the
-# environment variable VOID_COMMIT.  We still default to the tip of the
-# ${VOID_BRANCH} branch when the variable is not provided.  Keeping
-# VOID_BRANCH as "main" ensures the rest of the script (and downstream
-# consumers) behave exactly as before.
-if [[ -n "${VOID_COMMIT}" ]]; then
-  echo "Using explicit commit ${VOID_COMMIT}"
-  # Fetch just that commit to keep the clone shallow.
-  git fetch --depth 1 origin "${VOID_COMMIT}"
-  git checkout "${VOID_COMMIT}"
+# environment variable PRISM_COMMIT.
+if [[ -n "${PRISM_COMMIT}" ]]; then
+  echo "Using explicit commit ${PRISM_COMMIT}"
+  git fetch --depth 1 origin "${PRISM_COMMIT}"
+  git checkout "${PRISM_COMMIT}"
 else
-  git fetch --depth 1 origin "${VOID_BRANCH}"
+  # Try to fetch the default branch (main), if it fails, try 'master'
+  if git fetch --depth 1 origin "${PRISM_BRANCH}"; then
+    echo "Successfully fetched ${PRISM_BRANCH}"
+  else
+    echo "Branch '${PRISM_BRANCH}' not found. Trying 'master'..."
+    PRISM_BRANCH="master"
+    if ! git fetch --depth 1 origin "${PRISM_BRANCH}"; then
+        echo "Error: Could not find 'main' or 'master' branch in https://github.com/Danielkayode/prism-Editor.git"
+        exit 1
+    fi
+  fi
   git checkout FETCH_HEAD
 fi
 
 MS_TAG=$( jq -r '.version' "package.json" )
-MS_COMMIT=$VOID_BRANCH # Void - MS_COMMIT doesn't seem to do much
-VOID_VERSION=$( jq -r '.voidVersion' "product.json" ) # Void added this
+MS_COMMIT=$PRISM_BRANCH 
 
-if [[ -n "${VOID_RELEASE}" ]]; then # Void added VOID_RELEASE as optional to bump manually
-  RELEASE_VERSION="${MS_TAG}${VOID_RELEASE}"
-else
-  VOID_RELEASE=$( jq -r '.voidRelease' "product.json" )
-  RELEASE_VERSION="${MS_TAG}${VOID_RELEASE}"
+# Prism - Attempt to get prismVersion, fallback to null/empty if missing
+PRISM_VERSION=$( jq -r '.prismVersion // empty' "product.json" )
+
+# Fallback handling if not in product.json yet
+if [[ -z "${PRISM_VERSION}" ]]; then
+  echo "Prism version not found in product.json, using default fallback."
+  PRISM_VERSION="0.0.1"
 fi
-# Void - RELEASE_VERSION is later used as version (1.0.3+RELEASE_VERSION), so it MUST be a number or it will throw a semver error in void
 
+if [[ -n "${PRISM_RELEASE}" ]]; then 
+  RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE}"
+else
+  # Prism - Attempt to get prismRelease, fallback
+  PRISM_RELEASE=$( jq -r '.prismRelease // empty' "product.json" )
+  
+  if [[ -z "${PRISM_RELEASE}" ]]; then
+     echo "Prism release not found in product.json, using default fallback."
+     PRISM_RELEASE=""
+  fi
+  
+  RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE}"
+fi
 
 echo "RELEASE_VERSION=\"${RELEASE_VERSION}\""
 echo "MS_COMMIT=\"${MS_COMMIT}\""
@@ -70,20 +90,18 @@ if [[ "${GITHUB_ENV}" ]]; then
   echo "MS_TAG=${MS_TAG}" >> "${GITHUB_ENV}"
   echo "MS_COMMIT=${MS_COMMIT}" >> "${GITHUB_ENV}"
   echo "RELEASE_VERSION=${RELEASE_VERSION}" >> "${GITHUB_ENV}"
-  echo "VOID_VERSION=${VOID_VERSION}" >> "${GITHUB_ENV}" # Void added this
+  echo "PRISM_VERSION=${PRISM_VERSION}" >> "${GITHUB_ENV}"
 fi
-
-
 
 echo "----------- get_repo exports -----------"
 echo "MS_TAG ${MS_TAG}"
 echo "MS_COMMIT ${MS_COMMIT}"
 echo "RELEASE_VERSION ${RELEASE_VERSION}"
-echo "VOID VERSION ${VOID_VERSION}"
+echo "PRISM VERSION ${PRISM_VERSION}"
 echo "----------------------"
 
 
 export MS_TAG
 export MS_COMMIT
 export RELEASE_VERSION
-export VOID_VERSION
+export PRISM_VERSION
