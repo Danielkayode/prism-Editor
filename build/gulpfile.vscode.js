@@ -46,7 +46,13 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 		const version = packageJson.version;
 
 		const productJsonStream = gulp.src(['product.json'], { base: '.' })
-			.pipe(json({ commit, date: readISODate('out-build'), checksums, version, serverDownloadUrlTemplate: 'https://github.com/Danielkayode/binaries/releases/download/!!RELEASE_VERSION!!/prism-reh-${os}-${arch}-!!RELEASE_VERSION!!.tar.gz' }))
+			.pipe(json({ 
+				commit, 
+				date: readISODate('out-build'), 
+				checksums, 
+				version, 
+				serverDownloadUrlTemplate: 'https://github.com/Danielkayode/binaries/releases/download/!!RELEASE_VERSION!!/prism-reh-${os}-${arch}-!!RELEASE_VERSION!!.tar.gz' 
+			}))
 			.pipe(es.through(function (file) {
 				const product = JSON.parse(file.contents.toString());
 				file.contents = Buffer.from(JSON.stringify(product, null, '\t'));
