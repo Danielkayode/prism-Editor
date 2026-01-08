@@ -15,7 +15,7 @@ echo "GITHUB_ENV=${GITHUB_ENV}"
 
 echo "SHOULD_DEPLOY=${SHOULD_DEPLOY}"
 echo "SHOULD_BUILD=${SHOULD_BUILD}"
--------------------------
+echo "-------------------------"
 
 # git workaround for CI environments
 if [[ "${CI_BUILD}" != "no" ]]; then
@@ -49,8 +49,8 @@ MS_TAG=$( jq -r '.version' "package.json" )
 MS_COMMIT=$PRISM_BRANCH 
 
 # Extract Prism-specific versioning (with fallback for transition period)
-# Using 'select(. != null)' to prevent "null" string concatenation
-PRISM_VERSION=$( jq -r '.prismVersion // .voidVersion // empty' "product.json" )
+# Using 'select(. != null)' and 'empty' to ensure we don't get the string "null"
+PRISM_VERSION=$( jq -r '.prismVersion // .voidVersion | select(. != null) // empty' "product.json" )
 
 if [[ -n "${PRISM_RELEASE}" ]]; then 
   # Manual release override from workflow dispatch
@@ -58,7 +58,7 @@ if [[ -n "${PRISM_RELEASE}" ]]; then
 else
   # Automatic release suffix from product.json
   # We filter out null to prevent "1.99.3null" issues
-  PRISM_RELEASE_VAL=$( jq -r '.prismRelease // .voidRelease // empty' "product.json" )
+  PRISM_RELEASE_VAL=$( jq -r '.prismRelease // .voidRelease | select(. != null) // empty' "product.json" )
   RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE_VAL}"
 fi
 
@@ -81,7 +81,7 @@ echo "MS_TAG: ${MS_TAG}"
 echo "MS_COMMIT: ${MS_COMMIT}"
 echo "RELEASE_VERSION: ${RELEASE_VERSION}"
 echo "PRISM_VERSION: ${PRISM_VERSION}"
-----------------------
+echo "----------------------"
 
 export MS_TAG
 export MS_COMMIT
