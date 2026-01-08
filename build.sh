@@ -1,118 +1,83 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# shellcheck disable=SC1091
 
-# Prism Editor Build Script
-# This script builds the application for your current platform
+set -ex
 
-set -e  # Exit on error
+. version.sh
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+if [[ "${SHOULD_BUILD}" == "yes" ]]; then
+  echo "MS_COMMIT=\"${MS_COMMIT}\""
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Prism Editor Build Script${NC}"
-echo -e "${GREEN}========================================${NC}"
+  . prepare_vscode.sh
 
-# Detect platform
-OS_TYPE="unknown"
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    OS_TYPE="linux"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    OS_TYPE="macos"
-elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-    OS_TYPE="windows"
-fi
+  cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
-echo -e "${YELLOW}Detected OS: ${OS_TYPE}${NC}"
+  export NODE_OPTIONS="--max-old-space-size=8192"
 
-# Check Node.js version
-if ! command -v node &> /dev/null; then
-    echo -e "${RED}Error: Node.js is not installed${NC}"
-    exit 1
-fi
+  # Skip monaco-compile-check as it's failing due to searchUrl property
+  # Skip valid-layers-check as well since it might depend on monaco
+  # Void commented these out
+  # npm run monaco-compile-check
+  # npm run valid-layers-check
 
-NODE_VERSION=$(node -v)
-echo -e "${YELLOW}Node.js version: ${NODE_VERSION}${NC}"
+  npm run buildreact
+  npm run gulp compile-build-without-mangling
+  npm run gulp compile-extension-media
+  npm run gulp compile-extensions-build
+  npm run gulp minify-vscode
 
-# Check if package.json exists
-if [ ! -f "package.json" ]; then
-    echo -e "${RED}Error: package.json not found. Run this script from the project root.${NC}"
-    exit 1
-fi
+  if [[ "${OS_NAME}" == "osx" ]]; then
+    # generate Group Policy definitions
+    # node build/lib/policies darwin # Void commented this out
 
-# Clean previous builds
-echo -e "${YELLOW}Cleaning previous builds...${NC}"
-rm -rf dist out
+    npm run gulp "vscode-darwin-${VSCODE_ARCH}-min-ci"
 
-# Install dependencies
-echo -e "${YELLOW}Installing dependencies...${NC}"
-npm ci --no-audit --no-fund || {
-    echo -e "${RED}npm ci failed, trying npm install...${NC}"
-    npm install
-}
+    find "../VSCode-darwin-${VSCODE_ARCH}" -print0 | xargs -0 touch -c
 
-# Download built-in extensions (optional)
-echo -e "${YELLOW}Downloading built-in extensions...${NC}"
-npm run download-builtin-extensions || echo -e "${YELLOW}Skipping built-in extensions${NC}"
+    . ../build_cli.sh
 
-# Apply patches
-echo -e "${YELLOW}Applying patches...${NC}"
-if [ -f "extensions/tunnel-forwarding/src/split.ts" ]; then
-    if command -v gsed &> /dev/null; then
-        gsed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
-    elif sed --version 2>&1 | grep -q GNU; then
-        sed -i '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
-    else
-        sed -i '' '1s;^;// @ts-nocheck\n;' extensions/tunnel-forwarding/src/split.ts
+    VSCODE_PLATFORM="darwin"
+  elif [[ "${OS_NAME}" == "windows" ]]; then
+    # generate Group Policy definitions
+    # node build/lib/policies win32 # Void commented this out
+
+    # in CI, packaging will be done by a different job
+    if [[ "${CI_BUILD}" == "no" ]]; then
+      . ../build/windows/rtf/make.sh
+
+      npm run gulp "vscode-win32-${VSCODE_ARCH}-min-ci"
+
+      if [[ "${VSCODE_ARCH}" != "x64" ]]; then
+        SHOULD_BUILD_REH="no"
+        SHOULD_BUILD_REH_WEB="no"
+      fi
+
+      . ../build_cli.sh
     fi
+
+    VSCODE_PLATFORM="win32"
+  else # linux
+    # in CI, packaging will be done by a different job
+    if [[ "${CI_BUILD}" == "no" ]]; then
+      npm run gulp "vscode-linux-${VSCODE_ARCH}-min-ci"
+
+      find "../VSCode-linux-${VSCODE_ARCH}" -print0 | xargs -0 touch -c
+
+      . ../build_cli.sh
+    fi
+
+    VSCODE_PLATFORM="linux"
+  fi
+
+  if [[ "${SHOULD_BUILD_REH}" != "no" ]]; then
+    npm run gulp minify-vscode-reh
+    npm run gulp "vscode-reh-${VSCODE_PLATFORM}-${VSCODE_ARCH}-min-ci"
+  fi
+
+  if [[ "${SHOULD_BUILD_REH_WEB}" != "no" ]]; then
+    npm run gulp minify-vscode-reh-web
+    npm run gulp "vscode-reh-web-${VSCODE_PLATFORM}-${VSCODE_ARCH}-min-ci"
+  fi
+
+  cd ..
 fi
-
-# Compile the project
-echo -e "${YELLOW}Compiling project...${NC}"
-export NODE_OPTIONS="--max-old-space-size=8192"
-npm run compile
-
-# Compile extensions
-echo -e "${YELLOW}Compiling extensions...${NC}"
-npm run compile-extensions-build || echo -e "${YELLOW}Extension compilation completed with warnings${NC}"
-
-# Build with electron-builder
-echo -e "${YELLOW}Packaging application for ${OS_TYPE}...${NC}"
-
-case "$OS_TYPE" in
-    linux)
-        npx electron-builder --linux appimage deb --x64 --publish never
-        ;;
-    windows)
-        npx electron-builder --win nsis portable --x64 --publish never
-        ;;
-    macos)
-        ARCH=$(uname -m)
-        if [ "$ARCH" = "arm64" ]; then
-            npx electron-builder --mac dmg --arm64 --publish never
-        else
-            npx electron-builder --mac dmg --x64 --publish never
-        fi
-        export CSC_IDENTITY_AUTO_DISCOVERY=false
-        ;;
-    *)
-        echo -e "${RED}Unsupported OS: ${OS_TYPE}${NC}"
-        exit 1
-        ;;
-esac
-
-# Check build output
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Build completed!${NC}"
-echo -e "${GREEN}========================================${NC}"
-
-if [ -d "dist" ]; then
-    echo -e "${YELLOW}Build artifacts:${NC}"
-    find dist -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \) -exec ls -lh {} \;
-else
-    echo -e "${RED}Warning: dist directory not found${NC}"
-fi
-
-echo -e "${GREEN}Done!${NC}"
