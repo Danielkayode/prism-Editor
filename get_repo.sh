@@ -15,54 +15,52 @@ echo "GITHUB_ENV=${GITHUB_ENV}"
 
 echo "SHOULD_DEPLOY=${SHOULD_DEPLOY}"
 echo "SHOULD_BUILD=${SHOULD_BUILD}"
-echo "-------------------------"
+-------------------------
 
-# git workaround
+# git workaround for CI environments
 if [[ "${CI_BUILD}" != "no" ]]; then
   git config --global --add safe.directory "/__w/$( echo "${GITHUB_REPOSITORY}" | awk '{print tolower($0)}' )"
 fi
 
-PRISM_BRANCH="main"
-echo "Cloning Prism Editor ${PRISM_BRANCH}..."
+# The default branch for Prism Editor is 'master'
+PRISM_BRANCH="master"
+echo "Cloning Prism Editor from branch: ${PRISM_BRANCH}..."
 
-# We keep the directory as 'vscode' to maintain compatibility with build tools
-# that expect this specific folder structure.
+# Build tools expect the source to be in a 'vscode' folder
 mkdir -p vscode
 cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
 git init -q
-git remote add origin https://github.com/danielkayode/prism-Editor.git
+git remote add origin https://github.com/Danielkayode/prism-Editor.git
 
-# Allow callers to specify a particular commit to checkout via the
-# environment variable PRISM_COMMIT. We still default to the tip of the
-# ${PRISM_BRANCH} branch when the variable is not provided.
+# Handle specific commit checkouts (from workflow inputs) or default to master
 if [[ -n "${PRISM_COMMIT}" ]]; then
   echo "Using explicit commit ${PRISM_COMMIT}"
-  # Fetch just that commit to keep the clone shallow.
   git fetch --depth 1 origin "${PRISM_COMMIT}"
   git checkout "${PRISM_COMMIT}"
 else
+  echo "Fetching tip of ${PRISM_BRANCH}..."
   git fetch --depth 1 origin "${PRISM_BRANCH}"
   git checkout FETCH_HEAD
 fi
 
+# Extract versioning metadata
 MS_TAG=$( jq -r '.version' "package.json" )
 MS_COMMIT=$PRISM_BRANCH 
 
-# Prism - Try to get prismVersion, fallback to voidVersion if not found
-PRISM_VERSION=$( jq -r '.prismVersion // .voidVersion' "product.json" )
+# Extract Prism-specific versioning (with fallback for transition period)
+# Using 'select(. != null)' to prevent "null" string concatenation
+PRISM_VERSION=$( jq -r '.prismVersion // .voidVersion // empty' "product.json" )
 
 if [[ -n "${PRISM_RELEASE}" ]]; then 
-  # Manual release override
+  # Manual release override from workflow dispatch
   RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE}"
 else
-  # Prism - Try to get prismRelease, fallback to voidRelease
-  PRISM_RELEASE=$( jq -r '.prismRelease // .voidRelease' "product.json" )
-  RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE}"
+  # Automatic release suffix from product.json
+  # We filter out null to prevent "1.99.3null" issues
+  PRISM_RELEASE_VAL=$( jq -r '.prismRelease // .voidRelease // empty' "product.json" )
+  RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE_VAL}"
 fi
-
-# RELEASE_VERSION is later used as version (1.0.3+RELEASE_VERSION), 
-# so it MUST be a number or it will throw a semver error.
 
 echo "RELEASE_VERSION=\"${RELEASE_VERSION}\""
 echo "MS_COMMIT=\"${MS_COMMIT}\""
@@ -70,7 +68,7 @@ echo "MS_TAG=\"${MS_TAG}\""
 
 cd ..
 
-# for GH actions
+# Export variables for GitHub Actions environment
 if [[ "${GITHUB_ENV}" ]]; then
   echo "MS_TAG=${MS_TAG}" >> "${GITHUB_ENV}"
   echo "MS_COMMIT=${MS_COMMIT}" >> "${GITHUB_ENV}"
@@ -79,11 +77,11 @@ if [[ "${GITHUB_ENV}" ]]; then
 fi
 
 echo "----------- get_repo exports -----------"
-echo "MS_TAG ${MS_TAG}"
-echo "MS_COMMIT ${MS_COMMIT}"
-echo "RELEASE_VERSION ${RELEASE_VERSION}"
-echo "PRISM_VERSION ${PRISM_VERSION}"
-echo "----------------------"
+echo "MS_TAG: ${MS_TAG}"
+echo "MS_COMMIT: ${MS_COMMIT}"
+echo "RELEASE_VERSION: ${RELEASE_VERSION}"
+echo "PRISM_VERSION: ${PRISM_VERSION}"
+----------------------
 
 export MS_TAG
 export MS_COMMIT
