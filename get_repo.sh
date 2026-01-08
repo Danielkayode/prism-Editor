@@ -22,77 +22,47 @@ if [[ "${CI_BUILD}" != "no" ]]; then
   git config --global --add safe.directory "/__w/$( echo "${GITHUB_REPOSITORY}" | awk '{print tolower($0)}' )"
 fi
 
-# Allow PRISM_BRANCH to be overridden, default to main
-PRISM_BRANCH="${PRISM_BRANCH:-main}"
-echo "Cloning Prism..."
+PRISM_BRANCH="main"
+echo "Cloning Prism Editor ${PRISM_BRANCH}..."
 
+# We keep the directory as 'vscode' to maintain compatibility with build tools
+# that expect this specific folder structure.
 mkdir -p vscode
 cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
 git init -q
-git remote add origin https://github.com/Danielkayode/prism-Editor.git
+git remote add origin https://github.com/danielkayode/prism-Editor.git
 
 # Allow callers to specify a particular commit to checkout via the
-# environment variable PRISM_COMMIT.
+# environment variable PRISM_COMMIT. We still default to the tip of the
+# ${PRISM_BRANCH} branch when the variable is not provided.
 if [[ -n "${PRISM_COMMIT}" ]]; then
   echo "Using explicit commit ${PRISM_COMMIT}"
+  # Fetch just that commit to keep the clone shallow.
   git fetch --depth 1 origin "${PRISM_COMMIT}"
   git checkout "${PRISM_COMMIT}"
 else
-  # Try to fetch the default branch (main). 
-  # We use 'if git fetch' which is safe under 'set -e' because the failure is handled by the 'if' condition.
-  echo "Attempting to fetch branch: ${PRISM_BRANCH}"
-  if git fetch --depth 1 origin "${PRISM_BRANCH}" 2>/dev/null; then
-    echo "Successfully fetched ${PRISM_BRANCH}"
-  else
-    echo "Branch '${PRISM_BRANCH}' not found. Trying 'master'..."
-    PRISM_BRANCH="master"
-    if ! git fetch --depth 1 origin "${PRISM_BRANCH}" 2>/dev/null; then
-        echo "Branch 'master' not found. Fetching default remote branch..."
-        # Final fallback: fetch whatever the remote head is to detect the branch name
-        git fetch --depth 1 origin
-        # Detect the remote branch name (works for 'main', 'master', or custom names)
-        # We use ls-remote as a cleaner way to find the default branch without complex parsing
-        PRISM_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
-        
-        if [[ -z "${PRISM_BRANCH}" ]]; then
-           # If remote show fails, try ls-remote as a last resort
-           PRISM_BRANCH=$(git ls-remote --symref origin HEAD | awk '/^ref:/ {sub(/refs\/heads\//, "", $2); print $2}')
-        fi
-        
-        echo "Detected default branch as: ${PRISM_BRANCH}"
-        git fetch --depth 1 origin "${PRISM_BRANCH}"
-    fi
-    echo "Successfully fetched ${PRISM_BRANCH}"
-  fi
+  git fetch --depth 1 origin "${PRISM_BRANCH}"
   git checkout FETCH_HEAD
 fi
 
 MS_TAG=$( jq -r '.version' "package.json" )
 MS_COMMIT=$PRISM_BRANCH 
 
-# Prism - Attempt to get prismVersion, fallback to null/empty if missing
-PRISM_VERSION=$( jq -r '.prismVersion // empty' "product.json" )
-
-# Fallback handling if not in product.json yet
-if [[ -z "${PRISM_VERSION}" ]]; then
-  echo "Prism version not found in product.json, using default fallback."
-  PRISM_VERSION="0.0.1"
-fi
+# Prism - Try to get prismVersion, fallback to voidVersion if not found
+PRISM_VERSION=$( jq -r '.prismVersion // .voidVersion' "product.json" )
 
 if [[ -n "${PRISM_RELEASE}" ]]; then 
+  # Manual release override
   RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE}"
 else
-  # Prism - Attempt to get prismRelease, fallback
-  PRISM_RELEASE=$( jq -r '.prismRelease // empty' "product.json" )
-  
-  if [[ -z "${PRISM_RELEASE}" ]]; then
-     echo "Prism release not found in product.json, using default fallback."
-     PRISM_RELEASE=""
-  fi
-  
+  # Prism - Try to get prismRelease, fallback to voidRelease
+  PRISM_RELEASE=$( jq -r '.prismRelease // .voidRelease' "product.json" )
   RELEASE_VERSION="${MS_TAG}${PRISM_RELEASE}"
 fi
+
+# RELEASE_VERSION is later used as version (1.0.3+RELEASE_VERSION), 
+# so it MUST be a number or it will throw a semver error.
 
 echo "RELEASE_VERSION=\"${RELEASE_VERSION}\""
 echo "MS_COMMIT=\"${MS_COMMIT}\""
@@ -112,9 +82,8 @@ echo "----------- get_repo exports -----------"
 echo "MS_TAG ${MS_TAG}"
 echo "MS_COMMIT ${MS_COMMIT}"
 echo "RELEASE_VERSION ${RELEASE_VERSION}"
-echo "PRISM VERSION ${PRISM_VERSION}"
+echo "PRISM_VERSION ${PRISM_VERSION}"
 echo "----------------------"
-
 
 export MS_TAG
 export MS_COMMIT
