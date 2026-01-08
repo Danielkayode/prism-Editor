@@ -40,19 +40,22 @@ if [[ -n "${PRISM_COMMIT}" ]]; then
   git checkout "${PRISM_COMMIT}"
 else
   # Try to fetch the default branch (main). 
-  # We use '||' to prevent 'set -e' from killing the script if the first fetch fails.
+  # We use 'if git fetch' which is safe under 'set -e' because the failure is handled.
   echo "Attempting to fetch branch: ${PRISM_BRANCH}"
   if git fetch --depth 1 origin "${PRISM_BRANCH}" 2>/dev/null; then
     echo "Successfully fetched ${PRISM_BRANCH}"
   else
     echo "Branch '${PRISM_BRANCH}' not found. Trying 'master'..."
     PRISM_BRANCH="master"
-    if ! git fetch --depth 1 origin "${PRISM_BRANCH}"; then
-        echo "Error: Could not find 'main' or 'master' branch in https://github.com/Danielkayode/prism-Editor.git"
-        echo "Please verify that the repository is not empty and the branch name is correct."
-        exit 1
+    if ! git fetch --depth 1 origin "${PRISM_BRANCH}" 2>/dev/null; then
+        echo "Branch 'master' not found. Fetching default remote branch..."
+        # Final fallback: fetch whatever the remote head is
+        git fetch --depth 1 origin
+        PRISM_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
+        echo "Detected default branch as: ${PRISM_BRANCH}"
+        git fetch --depth 1 origin "${PRISM_BRANCH}"
     fi
-    echo "Successfully fetched master"
+    echo "Successfully fetched ${PRISM_BRANCH}"
   fi
   git checkout FETCH_HEAD
 fi
