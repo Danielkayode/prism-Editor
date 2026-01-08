@@ -40,6 +40,7 @@ if [[ -n "${PRISM_COMMIT}" ]]; then
   git checkout "${PRISM_COMMIT}"
 else
   # Try to fetch the default branch (main), if it fails, try 'master'
+  echo "Attempting to fetch branch: ${PRISM_BRANCH}"
   if git fetch --depth 1 origin "${PRISM_BRANCH}"; then
     echo "Successfully fetched ${PRISM_BRANCH}"
   else
@@ -47,8 +48,10 @@ else
     PRISM_BRANCH="master"
     if ! git fetch --depth 1 origin "${PRISM_BRANCH}"; then
         echo "Error: Could not find 'main' or 'master' branch in https://github.com/Danielkayode/prism-Editor.git"
+        echo "Please verify that the repository is not empty and the branch name is correct."
         exit 1
     fi
+    echo "Successfully fetched master"
   fi
   git checkout FETCH_HEAD
 fi
