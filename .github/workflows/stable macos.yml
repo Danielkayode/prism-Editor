@@ -12,10 +12,10 @@ on:
       checkout_pr:
         type: string
         description: Checkout PR
-      void_commit: # Void added this
+      prism_commit:
         type: string
-        description: Checkout specific Void commit
-      void_release: # Void added this
+        description: Checkout specific Prism commit
+      prism_release:
         type: string
         description: Custom release number
   repository_dispatch:
@@ -31,13 +31,9 @@ on:
     - '**/*.md'
 
 env:
-  APP_NAME: Void
-  # ASSETS_REPOSITORY is where all the downloads are.
-  # VSCodium has this be the current repo, voideditor/void-builder:
-  # ASSETS_REPOSITORY: ${{ github.repository }}
-
+  APP_NAME: Prism
   ASSETS_REPOSITORY: ${{ github.repository_owner }}/binaries
-  BINARY_NAME: void
+  BINARY_NAME: prism
   GH_REPO_PATH: ${{ github.repository_owner }}/binaries
   ORG_NAME: ${{ github.repository_owner }}
   OS_NAME: osx
@@ -60,8 +56,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.GITHUB_BRANCH }}
+
+      - name: Make scripts executable
+        run: chmod +x *.sh
 
       - name: Switch to relevant branch
         env:
@@ -80,9 +77,9 @@ jobs:
         if: env.VSCODE_ARCH == 'x64'
 
       - name: Clone VSCode repo
-        env: # Void added this
-          VOID_COMMIT: ${{ github.event.inputs.void_commit }} # Void added this
-          VOID_RELEASE: ${{ github.event.inputs.void_release }} # Void added this
+        env:
+          PRISM_COMMIT: ${{ github.event.inputs.prism_commit }}
+          PRISM_RELEASE: ${{ github.event.inputs.prism_release }}
         run: . get_repo.sh
 
       - name: Check PR or cron
@@ -90,7 +87,7 @@ jobs:
           GENERATE_ASSETS: ${{ github.event.inputs.generate_assets }}
         run: . check_cron_or_pr.sh
 
-      - name: Check existing VSCodium tags/releases
+      - name: Check existing tags/releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: . check_tags.sh
@@ -114,7 +111,7 @@ jobs:
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.STRONGER_GITHUB_TOKEN }} # Void bumped this to stronger
+          GITHUB_TOKEN: ${{ secrets.STRONGER_GITHUB_TOKEN }}
         run: ./release.sh
         if: env.SHOULD_BUILD == 'yes' && env.SHOULD_DEPLOY == 'yes'
 
