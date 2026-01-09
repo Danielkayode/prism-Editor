@@ -9,7 +9,7 @@
 	/>
 </div>
 
-Prism is the open-source Cursor alternative.
+Prism is  Cursor alternative.
 
 Use AI agents on your codebase, checkpoint and visualize changes, and bring any model or host locally. Prism sends messages directly to providers without retaining your data.
 
