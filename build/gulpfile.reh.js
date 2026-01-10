@@ -28,7 +28,7 @@ const fs = require('fs');
 const glob = require('glob');
 const { compileBuildWithManglingTask } = require('./gulpfile.compile');
 const { cleanExtensionsBuildTask, compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileExtensionMediaBuildTask } = require('./gulpfile.extensions');
-const { vscodeWebResourceIncludes, createVSCodeWebFileContentMapper } = require('./gulpfile.web');
+// const { vscodeWebResourceIncludes, createVSCodeWebFileContentMapper } = require('./gulpfile.web'); // Commented out - not available in Void fork
 
 const root = path.dirname(__dirname);
 const commit = getVersion(root);
@@ -101,10 +101,14 @@ const tweakProductForServerWeb = (product) => {
 			{
 				src: 'out-build',
 				entryPoints: buildfile.vscodeServer(type),
-				resources: vscodeWebResourceIncludes,
+				// resources: vscodeWebResourceIncludes, // Commented out - not available in Void fork
+				resources: [], // Empty array as fallback
 				out: `out-vscode-${type}`,
 				bundleIdMapper: {
-					'.build/extensions': (product) => createVSCodeWebFileContentMapper('.build/extensions', type === 'reh-web' ? tweakProductForServerWeb(product) : product)
+					'.build/extensions': (product) => {
+						// return createVSCodeWebFileContentMapper('.build/extensions', type === 'reh-web' ? tweakProductForServerWeb(product) : product); // Commented out - not available in Void fork
+						return {}; // Empty object as fallback
+					}
 				}
 			}
 		)
