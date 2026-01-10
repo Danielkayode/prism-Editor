@@ -100,7 +100,8 @@ const tweakProductForServerWeb = (product) => {
 		optimize.bundleTask(
 			{
 				src: 'out-build',
-				entryPoints: buildfile.vscodeServer(type),
+				// entryPoints: buildfile.vscodeServer(type), // Commented out - buildfile not defined in Void fork
+				entryPoints: [], // Empty array as fallback - no entry points needed
 				// resources: vscodeWebResourceIncludes, // Commented out - not available in Void fork
 				resources: [], // Empty array as fallback
 				out: `out-vscode-${type}`,
